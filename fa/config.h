@@ -36,9 +36,9 @@
 #define FA_REF_CNT_TRESHOLD					2
 
 /**
- * allow to track number of selectors leading towards a given cut-point (default is 1)
+ * allow to track number of selectors leading towards a given cut-point (default is 0)
  */
-#define FA_TRACK_SELECTORS					1
+#define FA_TRACK_SELECTORS					0
 
 /**
  * allow folding of nested structures (default is 1)
@@ -48,7 +48,7 @@
 /**
  * overapproximate when folding (default is 0)
  */
-#define FA_BOX_APPROXIMATION				0
+#define FA_BOX_APPROXIMATION					0
 
 /**
  * should we restart evry time a new box is encountered (default is 1)
