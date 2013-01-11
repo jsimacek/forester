@@ -481,11 +481,12 @@ void ConnectionGraph::normalizeSignature(CutpointSignature& signature)
 				p.first->second->refCount + signature[i].refCount,
 				static_cast<size_t>(FA_REF_CNT_TRESHOLD)
 			);
-			p.first->second->selCount = p.first->second->selCount + signature[i].selCount;
 			p.first->second->refInherited = false;
 			p.first->second->fwdSelectors.insert(
 					signature[i].fwdSelectors.begin(), signature[i].fwdSelectors.end()
 			);
+			// fwdSelectors always contains -1 which we need to subtract
+			p.first->second->selCount = p.first->second->fwdSelectors.size() - 1;
 
 			if (p.first->second->bwdSelector > signature[i].bwdSelector)
 				p.first->second->bwdSelector = signature[i].bwdSelector;
