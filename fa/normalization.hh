@@ -252,18 +252,30 @@ public:
 		for (auto& x : forbidden) {
 
 			marked[x] = true;
-
+#if FA_ALLOW_FOLDING
 			for (auto& cutpoint : this->fae.connectionGraph.data[x].signature) {
-
+/*
 				if ((cutpoint.root != x) && !this->selfReachable(cutpoint.root, x, marked))
 					continue;
 
 				marked[cutpoint.root] = true;
 
 				break;
+*/
+				for (auto& cutpoint2 : this->fae.connectionGraph.data[cutpoint.root].signature) {
+
+					if ((cutpoint2.root != x) || (cutpoint2.refCount != cutpoint.refCount))
+						continue;
+
+					marked[cutpoint.root] = true;
+
+					goto next;
+
+				}
 
 			}
-
+next:;
+#endif
 		}
 
 	}
