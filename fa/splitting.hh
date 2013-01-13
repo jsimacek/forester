@@ -294,6 +294,7 @@ public:
 			fae.appendRoot(&ta2.uselessAndUnreachableFree(*fae.allocTA()));
 
 			fae.connectionGraph.newRoot();
+			fae.makeDisjoint(fae.roots.size() - 1);
 			fae.connectionGraph.invalidate(root);
 
 			for (auto& f : ta3.getFinalStates()) {
@@ -369,8 +370,9 @@ public:
 				tmp.addFinalState(t.lhs()[lhsOffset]);
 				TreeAut* tmp2 = this->fae.allocTA();
 				tmp.unreachableFree(*tmp2);
-				// update 'o'
 				this->fae.appendRoot(tmp2);
+				this->fae.makeDisjoint(fae.roots.size() - 1);
+				// update 'o'
 				this->fae.connectionGraph.newRoot();
 			}
 			if (b->isType(box_type_e::bBox))
