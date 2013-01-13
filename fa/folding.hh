@@ -418,7 +418,7 @@ protected:
 
 	}
 
-	void computeSelectorMap(std::unordered_map<size_t, size_t>& selectorMap,
+	bool computeSelectorMap(std::unordered_map<size_t, size_t>& selectorMap,
 		size_t root, size_t state) {
 
 		assert(root < this->fae.roots.size());
@@ -435,7 +435,7 @@ protected:
 
 		Folding::computeSelectorMap(selectorMap, *ta.begin(state), signatures);
 
-		assert(this->checkSelectorMap(selectorMap, root, state));
+		return this->checkSelectorMap(selectorMap, root, state);
 
 	}
 
@@ -560,7 +560,9 @@ protected:
 
 		}
 
-		Folding::computeSelectorMap(selectorMap, root, state);
+		if (!Folding::computeSelectorMap(selectorMap, root, state))
+			return nullptr;
+
 		Folding::extractInputMap(inputMap, selectorMap, root, index);
 
 		auto box = std::unique_ptr<Box>(
@@ -631,7 +633,9 @@ protected:
 
 		}
 
-		Folding::computeSelectorMap(selectorMap, root, finalState);
+		if (!Folding::computeSelectorMap(selectorMap, root, finalState))
+			return nullptr;
+
 		Folding::extractInputMap(inputMap, selectorMap, root, index);
 
 		auto auxP = this->separateCutpoint(
@@ -669,7 +673,8 @@ protected:
 
 		selectorMap.clear();
 
-		Folding::computeSelectorMap(selectorMap, aux, this->fae.roots[aux]->getFinalState());
+		if (!Folding::computeSelectorMap(selectorMap, aux, this->fae.roots[aux]->getFinalState()))
+			assert(false);
 
 		size_t selector = Folding::extractSelector(selectorMap, root);
 
