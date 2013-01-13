@@ -114,6 +114,70 @@ void ConnectionGraph::computeSignatures(
 	}
 }
 
+void ConnectionGraph::checkSignatures(const TreeAut& ta)
+{
+	StateToCutpointSignatureMap stateMap;
+
+	std::list<const TT<label_type>*> transitions;
+
+	CutpointSignature v(1);
+
+	for (TreeAut::iterator i = ta.begin(); i != ta.end(); ++i)
+	{
+		const Data* data;
+
+		if (i->label()->isData(data))
+		{
+			if (data->isRef())
+			{
+				v[0] = CutpointInfo(data->d_ref.root);
+
+				ConnectionGraph::updateStateSignature(stateMap, i->rhs(), v);
+			} else
+			{
+				assert(stateMap.find(i->rhs()) == stateMap.end());
+
+				ConnectionGraph::updateStateSignature(stateMap, i->rhs(), CutpointSignature());
+			}
+		} else if (i->label()->isNode())
+		{
+			transitions.push_back(&*i);
+		}
+	}
+
+	bool changed = true;
+
+	while (transitions.size()/* && changed*/)
+	{
+		if (!changed)
+			assert(false);      // fail gracefully
+
+		changed = false;
+
+		for (auto i = transitions.begin(); i != transitions.end(); )
+		{
+			const TT<label_type>& t = **i;
+
+			assert(t.label()->isNode());
+
+			v.clear();
+
+			if (!processNode(v, t.lhs(), t.label(), stateMap))
+			{
+				++i;
+				continue;
+			}
+
+			ConnectionGraph::normalizeSignature(v);
+
+			ConnectionGraph::updateStateSignature(stateMap, t.rhs(), v);
+
+			changed = true;
+
+			i = transitions.erase(i);
+		}
+	}
+}
 
 void ConnectionGraph::fixSignatures(TreeAut& dst, const TreeAut& ta, size_t& offset)
 {

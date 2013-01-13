@@ -260,6 +260,9 @@ public:
 	static void computeSignatures(StateToCutpointSignatureMap& stateMap,
 		const TreeAut& ta);
 
+	// checks signature for all states of ta
+	static void checkSignatures(const TreeAut& ta);
+
 	// computes signature for all states of ta
 	static void fixSignatures(TreeAut& dst, const TreeAut& ta, size_t& offset);
 
