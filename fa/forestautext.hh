@@ -227,6 +227,21 @@ public:
 		}
 	}
 
+	void makeDisjoint(size_t root) {
+
+		assert(root < this->roots.size());
+
+		Index<size_t> index;
+
+		TreeAut* ta = this->allocTA();
+
+		TreeAut::rename(*ta, *this->roots[root], RenameNonleafF(index, this->nextState()));
+
+		this->roots[root] = std::shared_ptr<TreeAut>(ta);
+		this->incrementStateOffset(index.size());
+
+	}
+
 	void minimizeRoots() {
 		for (size_t i = 0; i < this->roots.size(); ++i) {
 			if (!this->roots[i])
