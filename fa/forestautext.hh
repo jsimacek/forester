@@ -103,6 +103,13 @@ public:
 		return dst;
 	}
 
+	void makeDisjoint(size_t root)
+	{
+		assert(root < this->roots.size());
+
+		this->roots[root] = std::shared_ptr<TreeAut>(&this->unique(*this->allocTA(), *this->roots[root]));
+	}
+
 public:
 
 	static bool subseteq(const FAE& lhs, const FAE& rhs)
@@ -225,21 +232,6 @@ public:
 				continue;
 			tmp.copyTransitions(*this->roots[i]);
 		}
-	}
-
-	void makeDisjoint(size_t root) {
-
-		assert(root < this->roots.size());
-
-		Index<size_t> index;
-
-		TreeAut* ta = this->allocTA();
-
-		TreeAut::rename(*ta, *this->roots[root], RenameNonleafF(index, this->nextState()));
-
-		this->roots[root] = std::shared_ptr<TreeAut>(ta);
-		this->incrementStateOffset(index.size());
-
 	}
 
 	void minimizeRoots() {
