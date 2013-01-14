@@ -34,6 +34,7 @@
 #include "connection_graph.hh"
 #include "forestautext.hh"
 #include "restart_request.hh"
+#include "unfolding.hh"
 #include "streams.hh"
 
 class Folding {
@@ -54,6 +55,9 @@ protected:
 		const ConnectionGraph::StateToCutpointSignatureMap& signatures) {
 
 		auto iter = signatures.find(state);
+
+		if (iter == signatures.end())
+			FA_DEBUG_AT(3, state);
 
 		assert(iter != signatures.end());
 
@@ -115,7 +119,7 @@ protected:
 
 	}
 
-	void componentCut(TreeAut& res, TreeAut& complement,
+	bool componentCut(TreeAut& res, TreeAut& complement,
 		ConnectionGraph::CutpointSignature& complementSignature, size_t root, size_t state,
 		size_t target
 	) {
@@ -149,12 +153,11 @@ protected:
 
 					if (ConnectionGraph::containsCutpoint(
 						Folding::getSignature(t.lhs()[lhsOffset + j], signatures), target)
-					) {
-
+					)
+					{
 						boxes.insert(box);
 
 						break;
-
 					}
 
 				}
@@ -226,8 +229,12 @@ protected:
 			if (complementSignature.empty())
 				complementSignature = tmp;
 
-			// a bit hacky but who cares
-			assert(Folding::isSignaturesCompatible(complementSignature, tmp));
+			if (!Folding::isSignaturesCompatible(complementSignature, tmp))
+			{	// seems that cut is not possible here
+				FA_DEBUG_AT(2, "cannot cut: " << complementSignature << " != " << tmp);
+
+				return false;
+			}
 
 			for (size_t i = 0; i < tmp.size(); ++i) {
 
@@ -249,23 +256,28 @@ protected:
 
 		}
 
+		return true;
+
 	}
 
-	std::pair<std::shared_ptr<TreeAut>, std::shared_ptr<TreeAut>> separateCutpoint(
+	bool separateCutpoint(
+		std::pair<std::shared_ptr<TreeAut>, std::shared_ptr<TreeAut>>& result,
 		ConnectionGraph::CutpointSignature& boxSignature, size_t root, size_t state,
-		size_t cutpoint) {
-
+		size_t cutpoint)
+	{
 		auto ta = std::shared_ptr<TreeAut>(this->fae.allocTA());
 		auto tmp = std::shared_ptr<TreeAut>(this->fae.allocTA());
 
-		this->componentCut(*ta, *tmp, boxSignature, root, state, cutpoint);
+		if (!this->componentCut(*ta, *tmp, boxSignature, root, state, cutpoint))
+			return false;
 
 		auto tmp2 = std::shared_ptr<TreeAut>(this->fae.allocTA());
 
 		tmp->unreachableFree(*tmp2);
 
-		return std::make_pair(ta, tmp2);
+		result = std::make_pair(ta, tmp2);
 
+		return true;
 	}
 
 	std::shared_ptr<TreeAut> relabelReferences(const TreeAut& ta,
@@ -544,7 +556,10 @@ protected:
 
 		size_t start = 0;
 
-		auto p = this->separateCutpoint(outputSignature, root, state, aux);
+		std::pair<std::shared_ptr<TreeAut>, std::shared_ptr<TreeAut>> p;
+
+		if (!this->separateCutpoint(p, outputSignature, root, state, aux))
+			return nullptr;
 
 		index[root] = start++;
 
@@ -611,7 +626,10 @@ protected:
 
 		size_t start = 0;
 
-		auto p = this->separateCutpoint(outputSignature, root, finalState, aux);
+		std::pair<std::shared_ptr<TreeAut>, std::shared_ptr<TreeAut>> p;
+
+		if (!this->separateCutpoint(p, outputSignature, root, finalState, aux))
+			return nullptr;
 
 		index[root] = start++;
 
@@ -638,9 +656,10 @@ protected:
 
 		Folding::extractInputMap(inputMap, selectorMap, root, index);
 
-		auto auxP = this->separateCutpoint(
-			inputSignature, aux, this->fae.roots[aux]->getFinalState(), root
-		);
+		std::pair<std::shared_ptr<TreeAut>, std::shared_ptr<TreeAut>> auxP;
+
+		if (!this->separateCutpoint(auxP, inputSignature, aux, this->fae.roots[aux]->getFinalState(), root))
+			return nullptr;
 /*
 		if (Folding::isSingular(*auxP.first))
 			return false;
@@ -728,37 +747,66 @@ public:
 		assert(this->fae.roots[root]);
 
 		if (forbidden.count(root))
-			return nullptr;
-
-		bool found = false;
-dis1_start:
-		// save state offset
-		this->fae.pushStateOffset();
+			return false;
 
 		this->fae.updateConnectionGraph();
 
-		for (auto& cutpoint : this->fae.connectionGraph.data[root].signature) {
+		if (!ConnectionGraph::containsCutpoint(this->fae.connectionGraph.data[root].signature, root))
+			return false;
 
-			if (cutpoint.root != root)
-				continue;
+#if FA_TYPE_1_UNFOLD_HEURISTICS
+		if (this->fae.roots[root]->getAcceptingTransitionCount() == 1)
+		{
+			const TT<label_type>& t = this->fae.roots[root]->getAcceptingTransition();
 
-			FA_DEBUG_AT(3, "type 1 cutpoint detected at root " << root);
+			std::set<const Box*> boxes;
 
-			auto boxPtr = this->makeType1Box(
-				root, this->fae.roots[root]->getFinalState(), root, forbidden, conditional
-			);
-
-			if (boxPtr) {
-
-				found = true;
-
-				goto dis1_start;
-
+			for (auto aBox : t.label()->getNode())
+			{
+				if ((aBox->getArity() == 0) && aBox->isBox() && static_cast<const Box*>(aBox)->hasSelfReference())
+					boxes.insert(static_cast<const Box*>(aBox));
 			}
 
-			this->fae.popStateOffset();
+			if (boxes.size())
+			{
+				FA_DEBUG_AT(3, "unfolding type 1 box at root " << root);
 
+				Unfolding(this->fae).unfoldBoxes(root, boxes);
+
+				this->signatureMap[root].first = false;
+
+				this->fae.updateConnectionGraph();
+
+				FA_DEBUG_AT(3, "after unfolding: " << std::endl << this->fae);
+			}
 		}
+#endif
+
+		bool found = false, hit;
+
+		do
+		{
+			FA_DEBUG_AT(3, "type 1 cutpoint detected at root " << root);
+
+			// save state offset
+			this->fae.pushStateOffset();
+
+			hit = (this->makeType1Box(
+				root, this->fae.roots[root]->getFinalState(), root, forbidden, conditional
+				) != nullptr);
+
+			if (hit)
+			{
+				found = true;
+
+				this->signatureMap[root].first = false;
+
+				this->fae.updateConnectionGraph();
+			}
+
+		} while (hit && ConnectionGraph::containsCutpoint(this->fae.connectionGraph.data[root].signature, root));
+
+		this->fae.popStateOffset();
 
 		return found;
 
@@ -791,7 +839,7 @@ dis2_start:
 
 				for (auto& tmp : stateSignaturePair.second) {
 
-					if ((tmp.refCount < 2) || tmp.refInherited || (tmp.root != cutpoint.root))
+					if ((tmp.refCount < 2) || tmp.refInherited || (tmp.root == cutpoint.root))
 						continue;
 
 					FA_DEBUG_AT(3, "type 2 cutpoint detected inside component " << root << " at state q" << stateSignaturePair.first);
@@ -803,6 +851,8 @@ dis2_start:
 					if (boxPtr) {
 
 						found = true;
+
+						this->signatureMap[root].first = false;
 
 						goto dis2_start;
 
@@ -864,6 +914,9 @@ dis3_start:
 			if (boxPtr) {
 
 				found = true;
+
+				this->signatureMap[root].first = false;
+				this->signatureMap[cutpoint.root].first = false;
 
 				goto dis3_start;
 
