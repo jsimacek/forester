@@ -252,7 +252,7 @@ public:
 		for (auto& x : forbidden) {
 
 			marked[x] = true;
-#if FA_ALLOW_FOLDING
+#if FA_KEEP_TYPE_3_CANDIDATES
 			for (auto& cutpoint : this->fae.connectionGraph.data[x].signature) {
 /*
 				if ((cutpoint.root != x) && !this->selfReachable(cutpoint.root, x, marked))
