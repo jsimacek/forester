@@ -46,6 +46,21 @@
 #define FA_ALLOW_FOLDING					1
 
 /**
+ * normalize before type 3 learning (default is 0)
+ */
+#define FA_NORMALIZE_BEFORE_TYPE_3_LEARNING			0
+
+/**
+ * unfold type 1 boxes before folding (default is 0)
+ */
+#define FA_TYPE_1_UNFOLD_HEURISTICS				0
+
+/**
+ * should normalization protect type 3 rootpoints (default is FA_ALLOW_FOLDING)
+ */
+#define FA_KEEP_TYPE_3_CANDIDATES				FA_ALLOW_FOLDING
+
+/**
  * overapproximate when folding (default is 0)
  */
 #define FA_BOX_APPROXIMATION					0
@@ -53,7 +68,7 @@
 /**
  * should we restart evry time a new box is encountered (default is 1)
  */
-#define FA_RESTART_AFTER_BOX_DISCOVERY		(1 + FA_BOX_APPROXIMATION)
+#define FA_RESTART_AFTER_BOX_DISCOVERY				1
 
 /**
  * enable fusion when computing abstraction (default is 1)
