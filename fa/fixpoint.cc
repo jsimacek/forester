@@ -453,7 +453,16 @@ void FI_abs::execute(ExecutionManager& execMan, const ExecState& state)
 
 	std::set<size_t> forbidden;
 #if FA_ALLOW_FOLDING
+
+#if FA_NORMALIZE_BEFORE_TYPE_3_LEARNING
+	computeForbiddenSet(forbidden, *fae);
+
+	normalize(*fae, state.GetMem(), forbidden, true);
+
+	forbidden.clear();
+#else
 	reorder(state.GetMem(), *fae);
+#endif
 
 	if (boxMan.boxDatabase().size())
 	{
@@ -526,7 +535,16 @@ void FI_fix::execute(ExecutionManager& execMan, const ExecState& state)
 
 	std::set<size_t> forbidden;
 #if FA_ALLOW_FOLDING
+
+#if FA_NORMALIZE_BEFORE_TYPE_3_LEARNING
+	computeForbiddenSet(forbidden, *fae);
+
+	normalize(*fae, state.GetMem(), forbidden, true);
+
+	forbidden.clear();
+#else
 	reorder(state.GetMem(), *fae);
+#endif
 
 	if (boxMan.boxDatabase().size())
 	{
