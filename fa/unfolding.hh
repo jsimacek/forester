@@ -36,13 +36,15 @@ class Unfolding {
 protected:
 
 	void boxMerge(TreeAut& dst, const TreeAut& src, const TreeAut& boxRoot, const Box* box, const std::vector<size_t>& rootIndex) {
+
 		TreeAut tmp(*this->fae.backend), tmp2(*this->fae.backend);
 //		this->fae.boxMan->adjustLeaves(tmp2, boxRoot);
 		this->fae.relabelReferences(tmp, boxRoot, rootIndex);
 		this->fae.unique(tmp2, tmp);
 		src.copyTransitions(dst, TreeAut::NonAcceptingF(src));
 		tmp2.copyTransitions(dst, TreeAut::NonAcceptingF(tmp2));
-		dst.addFinalStates(tmp2.getFinalStates());
+		dst.addFinalState(tmp2.getFinalState());
+
 		for (std::set<size_t>::const_iterator j = src.getFinalStates().begin(); j != src.getFinalStates().end(); ++j) {
 			for (TreeAut::iterator i = src.begin(*j); i != src.end(*j, i); ++i) {
 				std::vector<size_t> lhs;
@@ -50,17 +52,17 @@ protected:
 				size_t lhsOffset = 0;
 				if (box) {
 					bool found = false;
-					for (std::vector<const AbstractBox*>::const_iterator j = i->label()->getNode().begin(); j != i->label()->getNode().end(); ++j) {
-						if (!(*j)->isStructural()) {
-							label.push_back(*j);
+					for (auto aBox : i->label()->getNode()) {
+						if (!aBox->isStructural()) {
+							label.push_back(aBox);
 							continue;
 						}
-						const StructuralBox* b = static_cast<const StructuralBox*>(*j);
-						if (b != static_cast<const StructuralBox*>(box)) {
+						const StructuralBox* sBox = static_cast<const StructuralBox*>(aBox);
+						if (sBox != static_cast<const StructuralBox*>(box)) {
 							// this box is not interesting
-							for (size_t k = 0; k < b->getArity(); ++k, ++lhsOffset)
+							for (size_t k = 0; k < sBox->getArity(); ++k, ++lhsOffset)
 								lhs.push_back(i->lhs()[lhsOffset]);
-							label.push_back(b);
+							label.push_back(sBox);
 							continue;
 						}
 						lhsOffset += box->getArity();
@@ -72,7 +74,11 @@ protected:
 					}
 
 					if (!found)
-						assert(false);
+					{
+						dst.addTransition(i->lhs(), i->label(), dst.getFinalState());
+
+						continue;
+					}
 
 				} else {
 					lhs = i->lhs();
@@ -84,7 +90,7 @@ protected:
 					lhs2.insert(lhs2.end(), j->lhs().begin(), j->lhs().end());
 					label2.insert(label2.end(), j->label()->getNode().begin(), j->label()->getNode().end());
 					FA::reorderBoxes(label2, lhs2);
-					dst.addTransition(lhs2, this->fae.boxMan->lookupLabel(label2), j->rhs());
+					dst.addTransition(lhs2, this->fae.boxMan->lookupLabel(label2), dst.getFinalState());
 				}
 			}
 		}
@@ -92,7 +98,7 @@ protected:
 
 public:
 
-	void unfoldBox(size_t root, const Box* box) {
+	void unfoldBox(size_t root, const TT<label_type>& t, const Box* box) {
 
 //		CL_CDEBUG(3, "unfolding " << *(AbstractBox*)box << " at root " << root << std::endl << this->fae);
 
@@ -100,20 +106,24 @@ public:
 		assert(this->fae.roots[root]);
 		assert(box);
 
-		const TT<label_type>& t = this->fae.roots[root]->getAcceptingTransition();
+//		const TT<label_type>& t = this->fae.roots[root]->getAcceptingTransition();
 
 		size_t lhsOffset = 0;
 		std::vector<size_t> index = { root };
 
-		for (std::vector<const AbstractBox*>::const_iterator i = t.label()->getNode().begin(); i != t.label()->getNode().end(); ++i) {
+		bool found = false;
 
-			if (static_cast<const AbstractBox*>(box) != *i) {
+		for (auto el : t.label()->getNode()) {
 
-				lhsOffset += (*i)->getArity();
+			if (static_cast<const AbstractBox*>(box) != el) {
+
+				lhsOffset += el->getArity();
 
 				continue;
 
 			}
+
+			found = true;
 
 			for (size_t j = 0; j < box->getArity(); ++j) {
 
@@ -129,6 +139,9 @@ public:
 			break;
 
 		}
+
+		if (!found)
+			assert(false);
 
 		auto ta = std::shared_ptr<TreeAut>(this->fae.allocTA());
 
@@ -160,9 +173,21 @@ public:
 
 	}
 
-	void unfoldBoxes(size_t root, const std::set<const Box*>& boxes) {
-		for (std::set<const Box*>::const_iterator i = boxes.begin(); i != boxes.end(); ++i)
-			this->unfoldBox(root, *i);
+	void unfoldBox(size_t root, const Box* box)
+	{
+		assert(root < this->fae.roots.size());
+		assert(this->fae.roots[root]);
+
+		this->unfoldBox(root, this->fae.roots[root]->getAcceptingTransition(), box);
+	}
+
+	void unfoldBoxes(size_t root, const std::set<const Box*>& boxes)
+	{
+		assert(root < this->fae.roots.size());
+		assert(this->fae.roots[root]);
+
+		for (auto box : boxes)
+			this->unfoldBox(root, this->fae.roots[root]->getAcceptingTransition(), box);
 	}
 
 public:

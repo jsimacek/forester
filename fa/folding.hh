@@ -740,6 +740,48 @@ protected:
 
 public:
 
+	void unfoldType1Boxes(size_t root)
+	{
+		assert(this->fae.roots.size() == this->fae.connectionGraph.data.size());
+		assert(root < this->fae.roots.size());
+		assert(this->fae.roots[root]);
+
+		this->fae.updateConnectionGraph();
+
+		if (!ConnectionGraph::containsCutpoint(this->fae.connectionGraph.data[root].signature, root))
+			return;
+
+		Unfolding unfolding(this->fae);
+
+		bool unfolded = false;
+
+		auto ta = this->fae.roots[root];
+
+		for (auto iter = ta->accBegin(); iter != ta->accEnd(); ++iter)
+		{
+			for (auto aBox : iter->label()->getNode())
+			{
+				if ((aBox->getArity() == 0) && aBox->isBox() && static_cast<const Box*>(aBox)->hasSelfReference())
+				{
+					FA_DEBUG_AT(3, "unfolding " << *aBox << " at " << root);
+					
+					unfolding.unfoldBox(root, *iter, static_cast<const Box*>(aBox));
+
+					unfolded = true;
+				}
+			}
+		}
+
+		if (!unfolded)
+			return;
+
+		this->signatureMap[root].first = false;
+
+		this->fae.updateConnectionGraph();
+
+		FA_DEBUG_AT(3, "after unfolding: " << std::endl << this->fae);
+	}
+
 	bool discover1(size_t root, const std::set<size_t>& forbidden, bool conditional) {
 
 		assert(this->fae.roots.size() == this->fae.connectionGraph.data.size());
@@ -753,34 +795,6 @@ public:
 
 		if (!ConnectionGraph::containsCutpoint(this->fae.connectionGraph.data[root].signature, root))
 			return false;
-
-#if FA_TYPE_1_UNFOLD_HEURISTICS
-		if (this->fae.roots[root]->getAcceptingTransitionCount() == 1)
-		{
-			const TT<label_type>& t = this->fae.roots[root]->getAcceptingTransition();
-
-			std::set<const Box*> boxes;
-
-			for (auto aBox : t.label()->getNode())
-			{
-				if ((aBox->getArity() == 0) && aBox->isBox() && static_cast<const Box*>(aBox)->hasSelfReference())
-					boxes.insert(static_cast<const Box*>(aBox));
-			}
-
-			if (boxes.size())
-			{
-				FA_DEBUG_AT(3, "unfolding type 1 box at root " << root);
-
-				Unfolding(this->fae).unfoldBoxes(root, boxes);
-
-				this->signatureMap[root].first = false;
-
-				this->fae.updateConnectionGraph();
-
-				FA_DEBUG_AT(3, "after unfolding: " << std::endl << this->fae);
-			}
-		}
-#endif
 
 		bool found = false, hit;
 
@@ -888,7 +902,7 @@ dis3_start:
 
 		for (auto& cutpoint : this->fae.connectionGraph.data[root].signature) {
 
-			if (forbidden.count(cutpoint.root)/* || cutpoint.joint*/)
+			if (forbidden.count(cutpoint.root) || (root == cutpoint.root)/* || cutpoint.joint*/)
 				continue;
 
 			size_t selectorToRoot = ConnectionGraph::getSelectorToTarget(

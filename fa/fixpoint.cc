@@ -224,6 +224,8 @@ inline bool fold(FAE& fae, BoxMan& boxMan, const std::set<size_t>& forbidden) {
 
 		assert(fae.roots[i]);
 
+		folding.unfoldType1Boxes(i);
+
 		if (folding.discover1(i, forbidden, true))
 			matched = true;
 
@@ -383,6 +385,28 @@ inline void getCandidates(std::set<size_t>& candidates, const FAE& fae) {
 
 }
 
+inline void unfold1(FAE& fae, BoxMan& boxMan) {
+
+	fae.unreachableFree();
+
+	std::set<size_t> forbidden;
+
+	Folding folding(fae, boxMan);
+
+	computeForbiddenSet(forbidden, fae);
+
+	for (size_t i = 0; i < fae.roots.size(); ++i)
+	{
+		if (forbidden.count(i))
+			continue;
+
+		assert(fae.roots[i]);
+
+		folding.unfoldType1Boxes(i);
+	}
+
+}
+
 inline void learn1(FAE& fae, BoxMan& boxMan) {
 
 	fae.unreachableFree();
@@ -452,6 +476,7 @@ void FI_abs::execute(ExecutionManager& execMan, const ExecState& state)
 	fae->updateConnectionGraph();
 
 	std::set<size_t> forbidden;
+
 #if FA_ALLOW_FOLDING
 
 #if FA_NORMALIZE_BEFORE_TYPE_3_LEARNING
@@ -471,6 +496,9 @@ void FI_abs::execute(ExecutionManager& execMan, const ExecState& state)
 			forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
 		}
 
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+		unfold1(*fae, this->boxMan);
+#endif
 		fold(*fae, this->boxMan, forbidden);
 
 		forbidden.clear();
@@ -483,7 +511,16 @@ void FI_abs::execute(ExecutionManager& execMan, const ExecState& state)
 
 	normalize(*fae, state.GetMem(), forbidden, true);
 
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+	unfold1(*fae, this->boxMan);
+#endif
+
 	abstract(*fae, this->fwdConf, this->taBackend, this->boxMan);
+
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+	unfold1(*fae, this->boxMan);
+#endif
+
 #if FA_ALLOW_FOLDING
 	learn1(*fae, this->boxMan);
 
@@ -498,8 +535,14 @@ void FI_abs::execute(ExecutionManager& execMan, const ExecState& state)
 
 			normalize(*fae, state.GetMem(), forbidden, true);
 
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+			unfold1(*fae, this->boxMan);
+#endif
 			abstract(*fae, this->fwdConf, this->taBackend, this->boxMan);
 
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+			unfold1(*fae, this->boxMan);
+#endif
 			forbidden.clear();
 			for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
 			{
@@ -553,6 +596,9 @@ void FI_fix::execute(ExecutionManager& execMan, const ExecState& state)
 			forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
 		}
 
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+		unfold1(*fae, this->boxMan);
+#endif
 		fold(*fae, this->boxMan, forbidden);
 
 		forbidden.clear();
@@ -561,6 +607,7 @@ void FI_fix::execute(ExecutionManager& execMan, const ExecState& state)
 	computeForbiddenSet(forbidden, *fae);
 
 	normalize(*fae, state.GetMem(), forbidden, true);
+
 #if FA_ALLOW_FOLDING
 	if (boxMan.boxDatabase().size())
 	{
@@ -571,6 +618,9 @@ void FI_fix::execute(ExecutionManager& execMan, const ExecState& state)
 			forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
 		}
 
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+		unfold1(*fae, this->boxMan);
+#endif
 		while (fold(*fae, this->boxMan, forbidden))
 		{
 			forbidden.clear();
@@ -579,6 +629,9 @@ void FI_fix::execute(ExecutionManager& execMan, const ExecState& state)
 
 			normalize(*fae, state.GetMem(), forbidden, true);
 
+#if (FA_ALLOW_FOLDING && FA_TYPE_1_UNFOLD_HEURISTICS) 
+			unfold1(*fae, this->boxMan);
+#endif
 			forbidden.clear();
 
 			for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
