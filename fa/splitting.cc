@@ -585,6 +585,72 @@ void Splitting::isolateAtRoot(
 }
 
 
+void Splitting::split(std::vector<size_t>& newRoots, size_t root, const std::vector<size_t>& targetStates)
+{
+	// Assertions
+	assert(root < this->fae_.getRootCount());
+	assert(nullptr != this->fae_.getRoot(root));
+
+	std::vector<size_t> workingSet = { root };
+
+	for (auto targetState : targetStates)
+	{
+		root = static_cast<size_t>(-1);
+
+		for (auto r : workingSet)
+		{
+			if (this->fae_.getRoot(r)->begin(targetState) != this->fae_.getRoot(r)->end(targetState))
+			{
+				root = r;
+				break;
+			}
+		}
+
+		assert(root != static_cast<size_t>(-1));
+
+		auto ta = *this->fae_.getRoot(root);
+
+		// modified component with the target state replaced by root a reference
+		TreeAut topTA = TreeAut::createTAWithSameTransitions(ta);
+
+		topTA.addFinalStates(ta.getFinalStates());
+
+		size_t state = fae_.addData(topTA, Data::createRef(this->fae_.getRootCount()));
+
+		std::vector<size_t> lhs;
+		for (auto t : ta)
+		{
+			lhs.resize(t.GetChildren().size());
+
+			std::replace_copy(
+				t.GetChildren().begin(), t.GetChildren().end(), lhs.begin(), targetState, state
+			);
+
+			topTA.addTransition(lhs, TreeAut::GetSymbol(t), t.GetParent());
+		}
+
+		// exchange the original automaton with the new one
+		TreeAut* tmp = fae_.allocTA();
+		topTA.unreachableFree(*tmp);
+		this->fae_.setRoot(root, std::shared_ptr<TreeAut>(tmp));
+		this->fae_.connectionGraph.invalidate(root);
+
+		// a new component representing trees accepted by the target state
+		TreeAut bottomTA = TreeAut::createTAWithSameFinalStates(ta, false);
+		bottomTA.addFinalState(targetState);
+
+		tmp = fae_.allocTA();
+		bottomTA.unreachableFree(*tmp);
+		this->fae_.appendRoot(tmp);
+		this->fae_.makeDisjoint(this->fae_.getRootCount() - 1);
+		this->fae_.connectionGraph.newRoot();
+
+		workingSet.push_back(fae_.getRootCount());
+		newRoots.push_back(fae_.getRootCount());
+	}
+}
+
+
 void Splitting::isolateAtRoot(
 	std::vector<FAE*>&                            dst,
 	size_t                                        root,

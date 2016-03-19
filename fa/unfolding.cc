@@ -1,5 +1,7 @@
 #include "unfolding.hh"
 
+#include "splitting.hh"
+
 namespace
 {
     TreeAut TARelabeledToBox(
@@ -193,6 +195,139 @@ void Unfolding::substituteInputPorts(
 }
 
 
+bool Unfolding::updateBoxSignature(
+		StateToBoxSignatureMap& stateMap,
+		size_t             		state,
+		const BoxSignature&		boxSignature)
+{
+	auto itBoolPair = stateMap.insert(std::make_pair(state, boxSignature));
+
+	if (itBoolPair.second)
+		return true;
+
+	// in case the state is already mapped to something
+	BoxSignature& prevSignature = itBoolPair.first->second;
+
+	bool changed = false;
+
+	for (auto& boxOriginPair : boxSignature)
+	{
+		auto itBoolPair2 = prevSignature.insert(boxOriginPair);
+
+		if (itBoolPair2.second)
+		{
+			changed = true;
+			continue;
+		}
+
+		assert(
+			boxOriginPair.second == itBoolPair2.first->second || boxOriginPair.second == static_cast<size_t>(-1) ||
+			itBoolPair2.first->second == static_cast<size_t>(-1)
+		);
+
+		if (boxOriginPair.second == static_cast<size_t>(-1) && itBoolPair2.first->second != static_cast<size_t>(-1))
+		{
+			itBoolPair2.first->second = static_cast<size_t>(-1);
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
+
+void Unfolding::joinBoxSignature(BoxSignature& dst, const std::pair<const Box*, size_t>& boxOriginPair)
+{
+	auto itBoolPair = dst.insert(boxOriginPair);
+
+	if (itBoolPair.second)
+		return;
+
+	// -1 indicates that box appears multiple times
+	itBoolPair.first->second = static_cast<size_t>(-1);
+}
+
+
+void Unfolding::joinBoxSignature(BoxSignature& dst, const BoxSignature& src)
+{
+	for (auto& boxOriginPair : src)
+		joinBoxSignature(dst, boxOriginPair);
+}
+
+
+bool Unfolding::processLhs(
+		BoxSignature&					result,
+		const std::vector<size_t>&  	lhs,
+		const StateToBoxSignatureMap&	stateMap)
+{
+	for (auto state : lhs)
+	{
+		auto it = stateMap.find(state);
+
+		if (it == stateMap.end())
+			return false;
+
+		joinBoxSignature(result, it->second);
+	}
+
+	return true;
+}
+
+
+void Unfolding::computeBoxSignatureMap(
+		StateToBoxSignatureMap&	stateMap,
+		const TreeAut&			ta)
+{
+	stateMap.clear();
+
+	// the workset of transitions
+	std::list<const TreeAut::Transition*> transitions;
+
+	// compute the initial signatures for leaves, other signatures are cleared
+	for (auto trans : ta)
+	{	// traverse transitions of the TA
+		if (TreeAut::GetSymbol(trans)->isData())
+		{	// for data transitions
+			stateMap.insert(std::make_pair(trans.GetParent(), BoxSignature()));
+		} else
+		{	// for non-data transitions
+			transitions.push_back(&trans);
+		}
+	}
+
+	BoxSignature boxSignature;
+
+	// Now we propagate the computed signatures upward in the tree structure until the signatures
+	// stabilize. 'transitions' contains transitions that are to be processed.
+	bool changed = true;
+	while (changed)
+	{	// while there are still some transitions to be processed
+		changed = false;
+		for (auto t : transitions)
+		{
+			boxSignature.clear();
+
+			if (!processLhs(boxSignature, t->GetChildren(), stateMap))
+			{	// in case this transition cannot be processed because of some downward
+				// states with missing box information
+				continue;
+			}
+
+			for (const AbstractBox* box : TreeAut::GetSymbol(*t)->getNode())
+			{	// for all boxes in the label
+				assert(nullptr != box);
+
+				if (box->isBox())
+				{
+					joinBoxSignature(boxSignature, std::make_pair(static_cast<const Box*>(box), t->GetParent()));
+				}
+			}
+
+			changed |= updateBoxSignature(stateMap, t->GetParent(), boxSignature);
+		}
+	}
+}
+
 void Unfolding::unfoldBox(const size_t root, const Box* box)
 {
     //std::cerr << "FA " << this->fae;
@@ -222,4 +357,46 @@ void Unfolding::unfoldBoxes(const size_t root, const std::set<const Box*>& boxes
 {
     for (std::set<const Box*>::const_iterator i = boxes.begin(); i != boxes.end(); ++i)
         this->unfoldBox(root, *i);
+}
+
+void Unfolding::unfoldSingletons(const size_t root)
+{
+    assert(root < this->fae.getRootCount());
+    assert(nullptr != this->fae.getRoot(root));
+
+	auto ta = *this->fae.getRoot(root);
+
+	StateToBoxSignatureMap stateMap;
+
+	computeBoxSignatureMap(stateMap, ta);
+
+	std::unordered_map<size_t, std::set<const Box*>> stateToBoxSetMap;
+
+	for (auto finalState : ta.getFinalStates())
+	{
+		auto boxSignatureIter = stateMap.find(finalState);
+
+		assert(boxSignatureIter != stateMap.end());
+
+		for (auto boxStatePair : boxSignatureIter->second)
+		{
+			if (boxStatePair.second != static_cast<size_t>(-1))
+				stateToBoxSetMap.insert(std::make_pair(boxStatePair.second, std::set<const Box*>())).first->second.insert(boxStatePair.first);
+		}
+	}
+
+	std::vector<size_t> splittingStates;
+	for (auto stateBoxSetPair : stateToBoxSetMap)
+		splittingStates.push_back(stateBoxSetPair.first);
+
+	std::vector<size_t> roots;
+	Splitting(this->fae).split(roots, root, splittingStates);
+
+	auto i = 0;
+	for (auto stateBoxSetPair : stateToBoxSetMap)
+	{
+		unfoldBoxes(roots[i], stateBoxSetPair.second);
+
+		++i;
+	}
 }

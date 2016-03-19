@@ -195,6 +195,8 @@ public:   // methods
 		int                                base,
 		const std::vector<size_t>&         offsets);
 
+	void split(std::vector<size_t>& newRoots, size_t root, const std::vector<size_t>& targetStates);
+
 
 };
 

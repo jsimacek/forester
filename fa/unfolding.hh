@@ -74,10 +74,41 @@ private:
 		const Box*                    box);
 
 public:
+
+	typedef std::unordered_map<const Box*, size_t>		BoxSignature;
+	typedef std::unordered_map<size_t, BoxSignature>	StateToBoxSignatureMap;
+
+private:
+
+	static bool updateBoxSignature(
+		StateToBoxSignatureMap&	stateMap,
+		size_t			state,
+		const BoxSignature&	boxSignature);
+
+	static void joinBoxSignature(
+		BoxSignature&				dst,
+		const std::pair<const Box*, size_t>&	boxOriginPair);
+
+	static void joinBoxSignature(BoxSignature& dst, const BoxSignature& src);
+
+	static bool processLhs(
+		BoxSignature&			result,
+		const std::vector<size_t>&	lhs,
+		const StateToBoxSignatureMap&	stateMap);
+
+public:
+
+	static void computeBoxSignatureMap(
+		StateToBoxSignatureMap&	stateMap,
+		const TreeAut&		ta);
+
+public:
 	Unfolding(FAE& fae) : fae(fae) {}
 
 	void unfoldBox(const size_t root, const Box* box);
 	void unfoldBoxes(const size_t root, const std::set<const Box*>& boxes);
+
+	void unfoldSingletons(const size_t root);
 };
 
 #endif
