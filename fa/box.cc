@@ -357,8 +357,11 @@ std::ostream& operator<<(std::ostream& os, const Box& box)
 
 	os << "===" << std::endl << "output (";
 
-	for(auto& s : box.outputCoverage())
-		os << " +" << s;
+	if (box.selCoverage_.size())
+	{
+		for (auto &s : box.outputCoverage())
+			os << " +" << s;
+	}
 
 	os << " ) [" << box.outputSignature_ << "] ";
 

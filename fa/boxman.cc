@@ -46,7 +46,7 @@ namespace
 size_t translateSignature(
 	ConnectionGraph::CutpointSignature&         result,
 	std::vector<std::pair<size_t, size_t>>&     selectors,
-	size_t                                      root,
+	const size_t                                root,
 	const ConnectionGraph::CutpointSignature&   signature,
 	size_t                                      aux,
 	const std::vector<size_t>&                  index)
@@ -324,7 +324,7 @@ const TypeBox* BoxMan::createTypeInfo(
 
 
 Box* BoxMan::createType1Box(
-	size_t                                      root,
+	const size_t                                root,
 	const std::shared_ptr<TreeAut>&             output,
 	const ConnectionGraph::CutpointSignature&   signature,
 	const std::vector<size_t>&                  inputMap,

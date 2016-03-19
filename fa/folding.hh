@@ -116,6 +116,31 @@ protected:
 
 
 	/**
+	 * @brief  Creates a box with two components
+	 *
+	 * @param[in]  root         Index of the first tree automaton that is to be
+	 *                          put into a box
+	 * @param[in]  aux          Index of the other tree automaton
+	 * @param[in]  forbidden    The set of indices of cutpoints which are not
+	 *                          allowed to be folded
+	 * @param[in]  conditional  If @p false, inserts the box into the box database
+	 *                          if it is not already there, if @p true returns @p
+	 *                          nullptr in such a case
+	 * @param[in]  test         If @p true, then we are only testing if it is
+	 *                          possible to create the box and
+	 *
+	 * @returns  The created box (or @p nullptr if it is not in the box database
+	 *           and @p conditional is set to @p true or something bad happened)
+	 */
+	const Box* makeBox2Components(
+			size_t root,
+			size_t aux,
+			const std::set<size_t> &forbidden,
+			bool conditional = true,
+			bool test = false);
+
+
+	/**
 	 * @brief  Invalidates the signature of given root
 	 *
 	 * Invalidates the signature of given root.
@@ -153,9 +178,9 @@ protected:
 		TreeAut&                                 res,
 		TreeAut&                                 complement,
 		ConnectionGraph::CutpointSignature&      complementSignature,
-		size_t                                   root,
-		size_t                                   state,
-		size_t                                   target);
+		const size_t                             root,
+		const size_t                             state,
+		const size_t                             target);
 
 
 	/**
@@ -192,7 +217,7 @@ protected:
 	 * Relabels references in the tree automaton @p ta according to the @p index.
 	 *
 	 * @param[in]  ta     The tree automaton where the references are to be
-	 *                    relabelled 
+	 *                    relabelled
 	 * @param[in]  index  The index according to which the references are to be
 	 *                    relabelled
 	 *
@@ -218,7 +243,7 @@ protected:
 	 *
 	 * @param[in]  src        The tree automaton into which @p box is to be
 	 *                        inserted
-	 * @param[in]  state      The state under which @p box is to be inserted   
+	 * @param[in]  state      The state under which @p box is to be inserted
 	 * @param[in]  root       The first component inside @p box
 	 * @param[in]  box        The box to be inserted into @p src
 	 * @param[in]  signature  The signature of @p box
@@ -315,8 +340,8 @@ protected:
 	 *                          if it is not already there, if @p true returns @p
 	 *                          nullptr in such a case
 	 * @param[in]  test         If @p true, then we are only testing if it is
-	 *                          possible to create the box and 
-	 * 
+	 *                          possible to create the box and
+	 *
 	 * @returns  The created box (or @p nullptr if it is not in the box database
 	 *           and @p conditional is set to @p true or something bad happened)
 	 */
@@ -327,31 +352,6 @@ protected:
             const std::set<size_t> &forbidden,
             bool conditional = true,
             bool test = false);
-
-
-	/**
-	 * @brief  Creates a box with two components
-	 *
-	 * @param[in]  root         Index of the first tree automaton that is to be
-	 *                          put into a box
-	 * @param[in]  aux          Index of the other tree automaton
-	 * @param[in]  forbidden    The set of indices of cutpoints which are not
-	 *                          allowed to be folded
-	 * @param[in]  conditional  If @p false, inserts the box into the box database
-	 *                          if it is not already there, if @p true returns @p
-	 *                          nullptr in such a case
-	 * @param[in]  test         If @p true, then we are only testing if it is
-	 *                          possible to create the box and 
-	 *
-	 * @returns  The created box (or @p nullptr if it is not in the box database
-	 *           and @p conditional is set to @p true or something bad happened)
-	 */
-	const Box* makeBox2Components(
-			size_t root,
-			size_t aux,
-			const std::set<size_t> &forbidden,
-			bool conditional = true,
-			bool test = false);
 
 
 public:

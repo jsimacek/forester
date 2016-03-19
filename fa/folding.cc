@@ -247,9 +247,9 @@ std::vector<size_t> extractInputMap(
 
 std::pair<Folding::TreeAutShPtr, Folding::TreeAutShPtr> Folding::separateCutpoint(
 	ConnectionGraph::CutpointSignature&            boxSignature,
-	size_t                                         root,
-	size_t                                         state,
-	size_t                                         cutpoint)
+	const size_t                                   root,
+	const size_t                                   state,
+	const size_t                                   cutpoint)
 {
 	TreeAutShPtr ta  = TreeAutShPtr(fae_.allocTA());
 	TreeAutShPtr tmp = TreeAutShPtr(fae_.allocTA());
@@ -512,9 +512,9 @@ void Folding::componentCut(
 	TreeAut&                                 res,
 	TreeAut&                                 complement,
 	ConnectionGraph::CutpointSignature&      complementSignature,
-	size_t                                   root,
-	size_t                                   state,
-	size_t                                   target)
+	const size_t                             root,
+	const size_t                             state,
+	const size_t                             target)
 {
 	// Preconditions
 	assert(root < fae_.getRootCount());

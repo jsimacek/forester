@@ -193,11 +193,22 @@ SymState* FI_node_free::reverseAndIsect(
 	assert(data.isRef());
 	assert(0 == data.d_ref.displ);
 	const size_t root = data.d_ref.root;
+
+	std::unordered_set<size_t> rootsReferencedByVar;
+	for (size_t i = 0; i < tmpState->GetRegCount(); ++i)
+	{
+		const Data &bwdRegVal = bwdSucc.GetReg(i);
+		if (bwdRegVal.isRef())
+		{
+			rootsReferencedByVar.insert(bwdRegVal.d_ref.root);
+		}
+	}
+
 	if (nullptr != fae->getRoot(root))
 	{	// in case some unexpected TA is in the position
 
 		// move the TA away
-		fae->freePosition(data.d_ref.root);
+		fae->freePosition(data.d_ref.root, rootsReferencedByVar);
 	}
 
 	// load the number of the root that was deleted in the forward configuration

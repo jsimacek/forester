@@ -503,7 +503,7 @@ void Splitting::isolateAtRoot(
 	assert(root < fae_.getRootCount());
 	assert(nullptr != fae_.getRoot(root));
 
-	size_t newState = fae_.freshState();
+	const size_t newState = fae_.freshState();
 
 	TreeAut ta = TreeAut::createTAWithSameFinalStates(
 		/* original TA */ *fae_.getRoot(root),

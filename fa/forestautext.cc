@@ -200,7 +200,7 @@ void FAE::setLabelsToValue(
 }
 
 
-void FAE::freePosition(size_t root)
+void FAE::freePosition(size_t root, const std::unordered_set<size_t>& rootsReferencedByVar)
 {
 	// Preconditions
 	assert(root < roots_.size());
@@ -209,7 +209,7 @@ void FAE::freePosition(size_t root)
 	size_t pos;
 	for (pos = 0; pos < roots_.size(); ++pos)
 	{	// try to find a gap in the forest
-		if (nullptr == roots_[pos])
+		if (nullptr == roots_[pos] && !rootsReferencedByVar.count(pos))
 		{
 			break;
 		}
@@ -218,6 +218,12 @@ void FAE::freePosition(size_t root)
 	if (roots_.size() == pos)
 	{ // in case no gap was found
 		roots_.push_back(std::shared_ptr<TreeAut>());
+	}
+
+	while (rootsReferencedByVar.count(pos))
+	{
+		roots_.push_back(std::shared_ptr<TreeAut>());
+		++pos;
 	}
 
 	// 'pos' is now the target index
@@ -234,7 +240,7 @@ void FAE::freePosition(size_t root)
 
 	std::ostringstream os;
 	utils::printCont(os, index);
-	FA_NOTE("Index: " << os.str());
+	FA_DEBUG_AT(1,"Index: " << os.str());
 
 	// relabel references to the TA that was at 'pos'
 	for (size_t i = 0; i < roots_.size(); ++i)
@@ -249,7 +255,7 @@ void FAE::freePosition(size_t root)
 	// swap the TA
 	roots_[pos].swap(roots_[root]);
 
-	FA_NOTE("TA " << root << " moved to " << pos << ".");
-	FA_NOTE("FAE now: " << *this);
+	FA_DEBUG_AT(1,"TA " << root << " moved to " << pos << ".");
+	FA_DEBUG_AT(1,"FAE now: " << *this);
 }
 

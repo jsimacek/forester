@@ -434,6 +434,7 @@ namespace
 std::ostream& operator<<(std::ostream& os, const VATAAdapter& ta)
 {
     os << "TREE AUT " << std::endl;
+
     for (const auto t : ta.vataAut_)
     {
 		if (ta.isFinalState(t.GetParent()))

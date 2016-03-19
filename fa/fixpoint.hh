@@ -56,7 +56,7 @@ protected:
 
 	size_t abstrIteration_;
 
-	BoxesAtIteration foldedRoots_;
+	BoxesAtIteration iterationToFoldedRoots_;
 
 	FAEAtIteration faeAtIteration_;
 
@@ -84,7 +84,7 @@ public:
 	virtual void clearReverse()
 	{
 		faeAtIteration_.clear();
-		foldedRoots_.clear();
+		iterationToFoldedRoots_.clear();
 		abstrIteration_ = 0;
 	}
 
@@ -123,7 +123,7 @@ public:
 		ta_(ta),
 		boxMan_(boxMan),
 		abstrIteration_(0),
-		foldedRoots_(),
+		iterationToFoldedRoots_(),
 		faeAtIteration_()
 	{ }
 

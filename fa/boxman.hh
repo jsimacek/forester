@@ -394,7 +394,7 @@ public:
 	 * @returns  The created box with the @p output tree automaton inside
 	 */
 	static Box* createType1Box(
-		size_t                                      root,
+		const size_t                                root,
 		const std::shared_ptr<TreeAut>&             output,
 		const ConnectionGraph::CutpointSignature&   signature,
 		const std::vector<size_t>&                  inputMap,

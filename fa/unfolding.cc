@@ -70,15 +70,10 @@ void Unfolding::boxMerge(
 
                 FA::reorderBoxes(newLabel, newLhs);
 
-                if (nullptr == this->fae.boxMan->lookupLabel(newLabel).obj_)
-                {
-                    throw std::runtime_error("Cannot find box -- equivalent to invalid deref");
-                }
                 assert(nullptr != this->fae.boxMan->lookupLabel(newLabel).obj_);
                 dst.addTransition(
                         newLhs,
-                        static_cast<VATAAdapter::SymbolType>(
-                                this->fae.boxMan->lookupLabel(newLabel)),
+                        this->fae.boxMan->lookupLabel(newLabel),
                         (*relabeledTrans).GetParent()
                 );
             }
@@ -121,7 +116,10 @@ void Unfolding::getChildrenAndLabelFromBox(
         }
 
         if (!found)
+        {
+            throw std::runtime_error("Box to unfold not found!");
             assert(false);
+        }
 
     } else
     {
@@ -178,7 +176,10 @@ void Unfolding::substituteInputPorts(
 		const std::vector<size_t>&    index,
 		const Box*                    box)
 {
+    assert(nullptr != box);
+    assert(nullptr != box->getInput());
     assert(box->getInputIndex() < index.size());
+
 	const size_t aux = index.at(box->getInputIndex() + 1);
 
     assert(aux != static_cast<size_t>(-1));
@@ -330,10 +331,7 @@ void Unfolding::computeBoxSignatureMap(
 
 void Unfolding::unfoldBox(const size_t root, const Box* box)
 {
-    //std::cerr << "FA " << this->fae;
-    //std::cerr << "Root Number " << root << std::endl;
     assert(root < this->fae.getRootCount());
-    //std::cerr << "TA " << *(this->fae.getRoot(root));
     assert(nullptr != this->fae.getRoot(root));
     assert(nullptr != box);
 

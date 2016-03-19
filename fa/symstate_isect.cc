@@ -24,6 +24,8 @@
  * intersection of a pair of symbolic states.
  */
 
+#include <assert.h>
+
 // Forester headers
 #include "streams.hh"
 #include "symstate.hh"
@@ -537,6 +539,7 @@ void SymState::SubstituteRefs(
 		{ // register contains reference which has been removed before this instruction in forward run
 			continue;
 		}
+
 		const TreeAut* thisRoot = thisFAE->getRoot(thisRef).get();
 		const TreeAut* srcRoot  = srcFAE->getRoot(srcRef).get();
 
@@ -626,15 +629,6 @@ void SymState::SubstituteRefs(
 
 							lhs.push_back(thisTrans.GetNthChildren(i));
 						}
-						else if (srcIsData && (*srcData == oldValue))
-						{ // ************* perform substitution of reference *************
-							assert(thisIsData && thisData->isUndef());
-
-							FA_DEBUG_AT(1,"Substituting " << *srcData << " for " << newValue);
-
-							lhs.push_back(fae->addData(
-								*fae->getRoot(thisRoot).get(), newValue));
-						}
 						else if (srcIsData && thisIsData &&
 							!srcData->isRef() && !thisData->isRef())
 						{ // ************* process real data states (leaves) *************
@@ -673,6 +667,15 @@ void SymState::SubstituteRefs(
 
 							lhs.push_back(fae->addData(*fae->getRoot(thisRoot).get(),
 								Data::createRef(thisNewRoot)));
+						}
+						else if (srcIsData && (*srcData == oldValue))
+						{ // ************* perform substitution of reference *************
+							assert(thisIsData && thisData->isUndef());
+
+							FA_DEBUG_AT(1,"Substituting " << *srcData << " for " << newValue);
+
+							lhs.push_back(fae->addData(
+								*fae->getRoot(thisRoot).get(), newValue));
 						}
 						else if ((srcIsData && !thisIsData && srcData->isNull())
 							|| (!srcIsData && thisIsData && thisData->isNull())
@@ -751,7 +754,7 @@ void SymState::SubstituteRefs(
 				}
 				else
 				{
-					FA_LOG("not-matching: " << *thisIt << ", " << *srcIt);
+					FA_DEBUG_AT(1,"not-matching: " << *thisIt << ", " << *srcIt);
 				}
 			}
 		}
@@ -782,13 +785,13 @@ void SymState::Intersect(
 
 	if (this->GetRegCount() != fwd.GetRegCount())
 	{	// if the number of local registers does not match
-		FA_LOG("Number of local registers does not match -> creating empty intersection");
+		FA_DEBUG_AT(1, "Number of local registers does not match -> creating empty intersection");
 		return;      // empty FA
 	}
 
 	if (thisFAE->GetVarCount() != fwdFAE->GetVarCount())
 	{	// if the number of input ports of the FAE does not match
-		FA_LOG("Number of input ports does not match -> creating empty intersection");
+		FA_DEBUG_AT(1, "Number of input ports does not match -> creating empty intersection");
 		return;      // empty FA
 	}
 
@@ -1041,6 +1044,15 @@ void SymState::Intersect(
 							FA_DEBUG_AT(1,"Adding data node r" << _MSB_GET(state) << " of root " << curNewState.root);
 							//fae->getRoot(curNewState.root)->addFinalState(state);
 							lhs.push_back(state);
+						}
+						else if ((fwdIsData && fwdData->isUndef()) && thisIsData)
+						{
+							assert(fwdIsData && fwdData->isUndef());
+
+							//FA_DEBUG_AT(1,"Substituting " << *srcData << " for " << newValue);
+
+							lhs.push_back(fae->addData(
+								*fae->getRoot(thisRoot).get(), *fwdData));
 						}
 						else
 						{	// we should not get here

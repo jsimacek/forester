@@ -51,6 +51,23 @@ struct ExactTMatchF
 	}
 };
 
+std::vector<size_t> findSelectors(
+		const FAE&                    fae,
+		const TreeAut::Transition&    t)
+{
+	std::vector<size_t> index;
+
+    for (const AbstractBox* aBox : TreeAut::GetSymbol(t)->getNode())
+    {
+        if (aBox->isBox())
+        {
+            index.push_back(aBox->getOrder());
+        }
+	}
+
+	return index;
+}
+
 struct SmartTMatchF
 {
 	bool operator()(
@@ -270,7 +287,7 @@ void getCandidates(
 void FixpointBase::initFoldedRoots()
 {
 	abstrIteration_ = 0;
-	foldedRoots_.clear();
+	iterationToFoldedRoots_.clear();
 }
 
 
@@ -278,11 +295,11 @@ size_t FixpointBase::fold(
 		const std::shared_ptr<FAE>&       fae,
 		std::set<size_t>&                 forbidden)
 {
-	foldedRoots_[abstrIteration_] =
+	iterationToFoldedRoots_[abstrIteration_] =
 			BoxesAtRoot(Folding::fold(*fae, boxMan_, forbidden));
 	++abstrIteration_;
 
-	return foldedRoots_.at(abstrIteration_-1).size();
+	return iterationToFoldedRoots_.at(abstrIteration_ - 1).size();
 }
 
 
@@ -294,12 +311,43 @@ SymState* FixpointBase::reverseAndIsect(
 {
 	(void)fwdPred;
 	SymState* tmpState = execMan.copyState(bwdSucc);
-	std::shared_ptr<FAE> fae = std::shared_ptr<FAE>(new FAE(*(tmpState->GetFAE())));
 
-	assert(foldedRoots_.size() - faeAtIteration_.size() <= 1);
+	assert(iterationToFoldedRoots_.size() - faeAtIteration_.size() <= 1);
 	for (int i = abstrIteration_ - 1; i >= 0; --i)
 	{
-		assert(i < foldedRoots_.size());
+		assert(i < iterationToFoldedRoots_.size());
+
+		for (const auto& rootToBoxes : iterationToFoldedRoots_.at(i))
+		{
+			for (const auto& boxes : rootToBoxes.second)
+			{
+				std::shared_ptr<FAE> fae = std::shared_ptr<FAE>(new FAE(*(tmpState->GetFAE())));
+				if (fae->getRootCount() == 0)
+				{
+					return tmpState;
+				}
+
+				std::vector<FAE*> unfolded;
+				Splitting splitting(*fae);
+				splitting.isolateSet(
+						unfolded,
+						rootToBoxes.first,
+						0,
+						findSelectors(*fae, fae->getRoot(rootToBoxes.first)->getAcceptingTransition()));
+						//fae->getType(rootToBoxes.first)->getSelectors());
+				assert(unfolded.size() == 1);
+				fae = std::shared_ptr<FAE>(unfolded.at(0));
+				try
+				{
+					Unfolding(*fae).unfoldBox(rootToBoxes.first, boxes);
+				}
+				catch (std::runtime_error e)
+				{
+					;
+				}
+				tmpState->SetFAE(fae);
+			}
+		}
 
 		if (faeAtIteration_.count(i))
 		{
@@ -307,19 +355,6 @@ SymState* FixpointBase::reverseAndIsect(
 			st.init(*tmpState);
 			st.SetFAE(faeAtIteration_.at(i));
 			tmpState->Intersect(st);
-		}
-
-		for (const auto& rootToBoxes : foldedRoots_.at(i))
-		{
-			for (const auto& boxes : rootToBoxes.second)
-			{
-				fae = std::shared_ptr<FAE>(new FAE(*(tmpState->GetFAE())));
-				if (fae->getRootCount() == 0)
-				{
-					return tmpState;
-				}
-				Unfolding(*fae).unfoldBox(rootToBoxes.first, boxes);
-			}
 		}
 	}
 

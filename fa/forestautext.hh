@@ -441,7 +441,10 @@ public:
 	 *
 	 * @param[in]  root  The index in the FA to be freed
 	 */
-	void freePosition(size_t root);
+	void freePosition(
+			size_t                            root,
+			const std::unordered_set<size_t>& rootsReferencedByVar =
+					  std::unordered_set<size_t>());
 
 
 public:

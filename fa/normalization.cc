@@ -222,7 +222,9 @@ void Normalization::scan(
 	if (!extended)
 	{
 		for (auto& x : forbidden)
+		{
 			marked[x] = true;
+		}
 
 		return;
 	}
