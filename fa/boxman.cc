@@ -95,23 +95,30 @@ size_t translateSignature(
 } // namespace
 
 
-const Box* BoxAntichain::get(const Box& box)
+const Box* BoxAntichain::getBox(const Box& box)
 {
 	modified_ = false;
 
-	auto p = boxes_.insert(std::make_pair(box.getSignature(), std::list<Box>()));
+	const Box* boxPtr = boxMan_.getBox(box);
+
+	auto p = boxAntichainStore_.insert(std::make_pair(box.getSignature(), std::list<const Box*>()));
 
 	if (!p.second)
 	{
+		FA_DEBUG_AT(3, "refreshing antichain ...");
+
 		for (auto iter = p.first->second.begin(); iter != p.first->second.end(); )
 		{
 			// Assertions
-			assert(!modified_ || !box.simplifiedLessThan(*iter));
+			assert(!modified_ || !box.simplifiedLessThan(**iter));
 
-			if (!modified_ && box.simplifiedLessThan(*iter))
-				return &*iter;
+			FA_DEBUG_AT(3, " <= " << (*iter)->getName() << ": " << box.simplifiedLessThan(**iter));
+			FA_DEBUG_AT(3, " >= " << (*iter)->getName() << ": " << (*iter)->simplifiedLessThan(box));
 
-			if (iter->simplifiedLessThan(box))
+			if (!modified_ && box.simplifiedLessThan(**iter))
+				return *iter;
+
+			if ((*iter)->simplifiedLessThan(box))
 			{
 				auto tmp = iter++;
 
@@ -126,29 +133,28 @@ const Box* BoxAntichain::get(const Box& box)
 		}
 	}
 
-	p.first->second.push_back(box);
+	p.first->second.push_back(boxPtr);
 
 	modified_ = true;
 
 	++size_;
 
-	return &p.first->second.back();
+	return p.first->second.back();
 }
 
 
-const Box* BoxAntichain::lookup(const Box& box) const
+const Box* BoxAntichain::lookupBox(const Box& box) const
 {
 	// find the box according to the signature
-	auto iter = boxes_.find(box.getSignature());
+	auto iter = boxAntichainStore_.find(box.getSignature());
+	if (iter == boxAntichainStore_.end())
+		return nullptr;
 
-	if (iter != boxes_.end())
+	for (auto box2 : iter->second)
 	{
-		for (auto& box2 : iter->second)
+		if (box.simplifiedLessThan(*box2))
 		{
-			if (box.simplifiedLessThan(box2))
-			{
-				return &box2;
-			}
+			return box2;
 		}
 	}
 
@@ -158,10 +164,10 @@ const Box* BoxAntichain::lookup(const Box& box) const
 
 void BoxAntichain::asVector(std::vector<const Box*>& boxes) const
 {
-	for (auto& signatureListPair : boxes_)
+	for (auto& signatureListPair : boxAntichainStore_)
 	{
-		for (auto& box : signatureListPair.second)
-			boxes.push_back(&box);
+		for (auto box : signatureListPair.second)
+			boxes.push_back(box);
 	}
 }
 
@@ -217,7 +223,7 @@ bool BoxMan::EvaluateBoxF::operator()(
 		{
 			const SelBox* sBox = static_cast<const SelBox*>(aBox);
 			this->label.addMapItem(sBox->getData().offset, aBox, index, offset);
-			this->tag.push_back(sBox->getData().offset);
+			this->tag.push_back(std::make_pair(sBox->getData().offset, sBox->getLevel()));
 			break;
 		}
 		case box_type_e::bBox:
@@ -227,7 +233,7 @@ bool BoxMan::EvaluateBoxF::operator()(
 				it != bBox->outputCoverage().cend(); ++it)
 			{
 				this->label.addMapItem(*it, aBox, index, offset);
-				this->tag.push_back(*it);
+				this->tag.push_back(std::make_pair(*it, bBox->getLevel()));
 			}
 			break;
 		}
@@ -255,11 +261,11 @@ label_type BoxMan::lookupLabel(
 	{
 		NodeLabel* label = new NodeLabel(&p.first->first, nodeInfo);
 
-		std::vector<size_t> tag;
+		std::vector<std::pair<size_t, size_t>> tag;
 
 		label->iterate(EvaluateBoxF(*label, tag));
 
-		std::sort(tag.begin(), tag.end());
+		std::sort(tag.begin(), tag.end(), [](const std::pair<size_t, size_t>& x, const std::pair<size_t, size_t>& y) { return x.first < y.second; });
 
 		label->setTag(
 			const_cast<void*>(
@@ -277,6 +283,48 @@ label_type BoxMan::lookupLabel(
 	}
 
 	return p.first->second;
+}
+
+TreeAut& BoxMan::relabelReferences(
+	TreeAut&                      dst,
+	const TreeAut&                src,
+	const std::vector<size_t>&    index)
+{
+	dst.addFinalStates(src.getFinalStates());
+	for (const TreeAut::Transition& tr : src)
+	{
+		if (TreeAut::GetSymbol(tr)->isData())
+			continue;
+
+		std::vector<size_t> lhs;
+		for (size_t state : tr.GetChildren())
+		{
+			const Data* data;
+			if (this->isData(state, data))
+			{
+				if (data->isRef())
+				{
+					if (index[data->d_ref.root] != static_cast<size_t>(-1))
+					{
+						lhs.push_back(this->addData(dst, Data::createRef(index[data->d_ref.root], data->d_ref.displ)));
+					}
+					else
+					{
+						lhs.push_back(this->addData(dst, Data::createUndef()));
+					}
+				} else {
+					lhs.push_back(this->addData(dst, *data));
+				}
+			} else
+			{
+				lhs.push_back(state);
+			}
+		}
+
+		dst.addTransition(lhs, TreeAut::GetSymbol(tr), tr.GetParent());
+	}
+
+	return dst;
 }
 
 
@@ -328,7 +376,8 @@ Box* BoxMan::createType1Box(
 	const std::shared_ptr<TreeAut>&             output,
 	const ConnectionGraph::CutpointSignature&   signature,
 	const std::vector<size_t>&                  inputMap,
-	const std::vector<size_t>&                  index)
+	const std::vector<size_t>&                  index,
+	size_t					    level)
 {
 	ConnectionGraph::CutpointSignature outputSignature;
 	std::vector<std::pair<size_t, size_t>> selectors;
@@ -346,7 +395,8 @@ Box* BoxMan::createType1Box(
 		/* the input TA */ std::shared_ptr<TreeAut>(nullptr),
 		/* index of the input TA */ 0,
 		/* cutpoint signature of the input TA*/ ConnectionGraph::CutpointSignature(),
-		/* The vector of pairs of fwd and bwd selectors */ selectors
+		/* The vector of pairs of fwd and bwd selectors */ selectors,
+		level
 	);
 }
 
@@ -360,7 +410,8 @@ Box* BoxMan::createType2Box(
 	const std::shared_ptr<TreeAut>&               input,
 	const ConnectionGraph::CutpointSignature&     signature2,
 	size_t                                        inputSelector,
-	std::vector<size_t>&                          index)
+	std::vector<size_t>&                          index,
+	size_t					      level)
 {
 	// Assertions
 	assert(aux < index.size());
@@ -406,7 +457,8 @@ Box* BoxMan::createType2Box(
 		input,
 		inputIndex,
 		inputSignature,
-		selectors
+		selectors,
+		level
 	);
 }
 
@@ -417,22 +469,14 @@ const Box* BoxMan::getBox(const Box& box)
 	const Box* cpBox = boxes_.get(box);
 	assert(nullptr != cpBox);
 
-	if (boxes_.modified())
-	{	// in the case a new box was inserted
+	if (boxes_.modified() && cpBox->getInput() != nullptr)
+	{	// perform additional initialization
 		Box* pBox = const_cast<Box*>(cpBox);
 
-		// perform initialization
-		pBox->name_ = this->getBoxName();
-		pBox->initialize();
+		std::unique_ptr<TreeAut> tmp = std::unique_ptr<TreeAut>(TreeAut::allocateTAWithSameTransitions(*cpBox->getInput()));
 
-		FA_DEBUG_AT(1, "learning " << *static_cast<const AbstractBox*>(cpBox)
-			<< ':' << std::endl << *cpBox);
-
-#if FA_RESTART_AFTER_BOX_DISCOVERY
-		throw RestartRequest("a new box encountered");
-#endif
+		pBox->setSymetric(Box::equal(*cpBox->getOutput(), this->relabelReferences(*tmp, *cpBox->getInput(), { 1, 0 })));
 	}
-
 	return cpBox;
 }
 

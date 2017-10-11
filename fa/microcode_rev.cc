@@ -57,10 +57,11 @@ namespace
         std::set<size_t> forbidden = getUnusedRoots(roots, fae->getRootCount());
         forbidden.insert(roots.begin(), roots.end());
 
-        Folding::learn2(*fae, boxMan, forbidden);
-        Folding::learn1(*fae, boxMan, forbidden);
+	throw "not implemented";
+//        Folding::learn2(*fae, boxMan, forbidden);
+//        Folding::learn1(*fae, boxMan, forbidden);
 
-		Folding::fold(*fae, boxMan, forbidden);
+//		Folding::fold(*fae, boxMan, forbidden, 0);
 		// TODO: while here??
 
 		return tmpState;

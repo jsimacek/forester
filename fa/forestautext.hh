@@ -326,18 +326,12 @@ public:
 
 	size_t addData(TreeAut& dst, const Data& data)
 	{
-		label_type label = this->boxMan->lookupLabel(data);
-		size_t state = _MSB_ADD(label->getDataId());
-		dst.addTransition(std::vector<size_t>(), label, state);
-		return state;
+		return this->boxMan->addData(dst, data);
 	}
 
 	bool isData(size_t state, const Data*& data) const
 	{
-		if (!FA::isData(state))
-			return false;
-		data = &this->boxMan->getData(_MSB_GET(state));
-		return true;
+		return this->boxMan->isData(state, data);
 	}
 
 	const Data& getData(size_t state) const
@@ -403,7 +397,10 @@ public:
 	TreeAut& relabelReferences(
 		TreeAut&                      dst,
 		const TreeAut&                src,
-		const std::vector<size_t>&    index);
+		const std::vector<size_t>&    index)
+	{
+		return this->boxMan->relabelReferences(dst, src, index);
+	}
 
 
 	TreeAut* relabelReferences(
@@ -413,7 +410,7 @@ public:
 		// Preconditions
 		assert(nullptr != src);
 
-		return &this->relabelReferences(*this->allocTA(), *src, index);
+		return &this->boxMan->relabelReferences(*this->allocTA(), *src, index);
 	}
 
 
@@ -446,6 +443,10 @@ public:
 			const std::unordered_set<size_t>& rootsReferencedByVar =
 					  std::unordered_set<size_t>());
 
+	BoxMan* getBoxMan()
+	{
+		return this->boxMan;
+	}
 
 public:
     label_type getUndefLabel()

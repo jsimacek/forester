@@ -29,122 +29,6 @@
 #include "box.hh"
 #include "config.h"
 
-class BoxAntichain
-{
-private:  // data types
-
-	typedef std::unordered_map<Box::Signature, std::list<Box>,
-		boost::hash<Box::Signature>> TBoxStore;
-
-	typedef TBoxStore::const_iterator const_iterator;
-
-private:  // data members
-
-	TBoxStore boxes_;
-
-	std::list<Box> obsolete_;
-
-	bool modified_;
-
-	size_t size_;
-
-public:
-
-	BoxAntichain() :
-		boxes_(),
-		obsolete_(),
-		modified_(false),
-		size_(0)
-	{ }
-
-
-	/**
-	 * @brief  Retrieves a box from the antichain (may insert it)
-	 *
-	 * This method retrieves the unique pointer to @p box from the antichain (in
-	 * the case it is not present it inserts it).
-	 *
-	 * @param[in]  box  The box to be retrieved
-	 *
-	 * @returns  The unique pointer to @p box
-	 */
-	const Box* get(const Box& box);
-
-
-	/**
-	 * @brief  Retrievse a box from the antichain
-	 *
-	 * This method retrieves the unique pointer to @p box (or @p nullptr if not
-	 * present) from the antichain.
-	 *
-	 * @param[in]  box  The box to be retrieved
-	 *
-	 * @returns  The unique pointer to @p box or @p nullptr
-	 */
-	const Box* lookup(const Box& box) const;
-
-
-	/**
-	 * @brief  Has the antichain been modified?
-	 *
-	 * This method returns @p true in the case the antichain has been modified
-	 * during the last BoxAntichain::get() operation (the operation resets it at
-	 * the beginning).
-	 *
-	 * @returns  Has the antichain been modified?
-	 */
-	bool modified() const
-	{
-		return modified_;
-	}
-
-
-	/**
-	 * @brief  The count of active elements
-	 *
-	 * Returns the count of active elements (obsolete are not counted).
-	 *
-	 * @returns  The count of active elements
-	 */
-	size_t size() const
-	{
-		return size_ - obsolete_.size();
-	}
-
-
-	/**
-	 * @brief  Is the antichain empty?
-	 *
-	 * Returns @p true in the case the antichain is empty, not taking into account
-	 * obsolete elements, @p false otherwise.
-	 *
-	 * @returns @p true in the case the antichain is empty, @p false otherwise
-	 */
-	bool empty() const
-	{
-		return this->size() == 0;
-	}
-
-
-	void clear()
-	{
-		boxes_.clear();
-	}
-
-	const_iterator begin() const
-	{
-		return boxes_.begin();
-	}
-
-	const_iterator end() const
-	{
-		return boxes_.end();
-	}
-
-	void asVector(std::vector<const Box*>& boxes) const;
-};
-
-
 class BoxSet
 {
 private:  // data types
@@ -178,8 +62,24 @@ public:
 	 */
 	const Box* get(const Box& box)
 	{
-		auto iterBoolPair = boxes_.insert(box);
+		std::pair<TBoxSet::iterator, bool> iterBoolPair = boxes_.insert(box);
 		modified_ = iterBoolPair.second;
+
+		if (modified_)
+		{
+			Box* pBox = const_cast<Box*>(&*iterBoolPair.first);
+
+			std::stringstream sstr;
+
+			sstr << "box" << boxes_.size() - 1;
+
+			// initialization
+			pBox->name_ = sstr.str();
+			pBox->initialize();
+
+			FA_DEBUG_AT(1, "learning " << *static_cast<AbstractBox*>(pBox) << ':' << std::endl << *pBox);
+		}
+
 		return &*iterBoolPair.first;
 	}
 
@@ -254,11 +154,136 @@ public:
 	}
 };
 
+class BoxMan;
+
+class BoxAntichain
+{
+private:  // data types
+
+	typedef std::unordered_map<Box::Signature, std::list<const Box*>,
+		boost::hash<Box::Signature>> TBoxAntichainStore;
+
+	typedef TBoxAntichainStore::const_iterator const_iterator;
+
+private:  // data members
+	BoxMan& boxMan_;
+
+	TBoxAntichainStore boxAntichainStore_;
+
+	std::list<const Box*> obsolete_;
+
+	bool modified_;
+
+	size_t size_;
+
+public:
+
+	BoxAntichain(BoxMan& boxMan) :
+		boxMan_(boxMan),
+		boxAntichainStore_(),
+		obsolete_(),
+		modified_(false),
+		size_(0)
+	{ }
+
+
+	/**
+	 * @brief  Retrieves a box from the antichain (may insert it)
+	 *
+	 * This method retrieves the unique pointer to @p box from the antichain (in
+	 * the case it is not present it inserts it).
+	 *
+	 * @param[in]  box  The box to be retrieved
+	 *
+	 * @returns  The unique pointer to @p box
+	 */
+	const Box* getBox(const Box& box);
+
+
+	/**
+	 * @brief  Retrievse a box from the antichain
+	 *
+	 * This method retrieves the unique pointer to @p box (or @p nullptr if not
+	 * present) from the antichain.
+	 *
+	 * @param[in]  box  The box to be retrieved
+	 *
+	 * @returns  The unique pointer to @p box or @p nullptr
+	 */
+	const Box* lookupBox(const Box& box) const;
+
+
+	/**
+	 * @brief  Has the antichain been modified?
+	 *
+	 * This method returns @p true in the case the antichain has been modified
+	 * during the last BoxAntichain::get() operation (the operation resets it at
+	 * the beginning).
+	 *
+	 * @returns  Has the antichain been modified?
+	 */
+	bool modified() const
+	{
+		return modified_;
+	}
+
+
+	/**
+	 * @brief  The count of active elements
+	 *
+	 * Returns the count of active elements (obsolete are not counted).
+	 *
+	 * @returns  The count of active elements
+	 */
+	size_t size() const
+	{
+		return size_ - obsolete_.size();
+	}
+
+
+	/**
+	 * @brief  Is the antichain empty?
+	 *
+	 * Returns @p true in the case the antichain is empty, not taking into account
+	 * obsolete elements, @p false otherwise.
+	 *
+	 * @returns @p true in the case the antichain is empty, @p false otherwise
+	 */
+	bool empty() const
+	{
+		return this->size() == 0;
+	}
+
+	const std::list<const Box*>& getObsoleteList() const
+	{
+		return this->obsolete_;
+	}
+
+	void clear()
+	{
+		boxAntichainStore_.clear();
+	}
+
+	const_iterator begin() const
+	{
+		return boxAntichainStore_.begin();
+	}
+
+	const_iterator end() const
+	{
+		return boxAntichainStore_.end();
+	}
+
+	void asVector(std::vector<const Box*>& boxes) const;
+};
+
+/*
 #if FA_BOX_APPROXIMATION
 	typedef BoxAntichain BoxDatabase;
 #else
 	typedef BoxSet BoxDatabase;
 #endif
+*/
 
 class BoxMan
 {
@@ -269,8 +294,8 @@ private:  // data types
 		boost::hash<std::vector<const AbstractBox*>>> TNodeStore;
 	typedef std::unordered_map<std::pair<size_t, DataArray>, NodeLabel*,
 		boost::hash<std::pair<size_t, DataArray>>> TVarDataStore;
-	typedef std::unordered_set< std::pair<const TypeBox*, std::vector<size_t>>,
-		boost::hash<std::pair<const TypeBox*, std::vector<size_t>>>> TTagStore;
+	typedef std::unordered_set< std::pair<const TypeBox*, std::vector<std::pair<size_t, size_t>>>,
+		boost::hash<std::pair<const TypeBox*, std::vector<std::pair<size_t, size_t>>>>> TTagStore;
 	typedef std::unordered_map<SelData, const SelBox*, boost::hash<SelData>>
 		TSelIndex;
 	typedef std::unordered_map<std::string, const TypeBox*> TTypeIndex;
@@ -288,8 +313,10 @@ private:  // data members
 	TSelIndex selIndex_;
 	TTypeIndex typeIndex_;
 
-	BoxDatabase boxes_;
-
+	BoxSet boxes_;
+#if FA_BOX_APPROXIMATION
+	BoxAntichain boxAntichain_;
+#endif
 	TTypeDescDict typeDescDict_;
 
 private:  // methods
@@ -336,11 +363,11 @@ public:
 	struct EvaluateBoxF
 	{
 		NodeLabel& label;
-		std::vector<size_t>& tag;
+		std::vector<std::pair<size_t, size_t>>& tag;
 
 		EvaluateBoxF(
 			NodeLabel& label,
-			std::vector<size_t>& tag
+			std::vector<std::pair<size_t, size_t>>& tag
 		) :
 			label(label),
 			tag(tag)
@@ -371,6 +398,27 @@ public:
 		return *dataIndex_[index];
 	}
 
+	size_t addData(TreeAut& dst, const Data& data)
+	{
+		label_type label = this->lookupLabel(data);
+		size_t state = _MSB_ADD(label->getDataId());
+		dst.addTransition(std::vector<size_t>(), label, state);
+		return state;
+	}
+
+	bool isData(size_t state, const Data*& data) const
+	{
+		if (!_MSB_TEST(state))
+			return false;
+		data = &this->getData(_MSB_GET(state));
+		return true;
+	}
+
+	TreeAut& relabelReferences(
+		TreeAut&                      dst,
+		const TreeAut&                src,
+		const std::vector<size_t>&    index);
+
 	const SelBox* getSelector(const SelData& sel);
 
 	const TypeBox* getTypeInfo(const std::string& name);
@@ -398,7 +446,8 @@ public:
 		const std::shared_ptr<TreeAut>&             output,
 		const ConnectionGraph::CutpointSignature&   signature,
 		const std::vector<size_t>&                  inputMap,
-		const std::vector<size_t>&                  index);
+		const std::vector<size_t>&                  index,
+		size_t					    level);
 
 
 	/**
@@ -432,7 +481,8 @@ public:
 		const std::shared_ptr<TreeAut>&              input,
 		const ConnectionGraph::CutpointSignature&    signature2,
 		size_t                                       inputSelector,
-		std::vector<size_t>&                         index);
+		std::vector<size_t>&                         index,
+		size_t					     level);
 
 
 	/**
@@ -463,6 +513,9 @@ public:
 		selIndex_{},
 		typeIndex_{},
 		boxes_{},
+#if FA_BOX_APPROXIMATION
+		boxAntichain_(*this),
+#endif
 		typeDescDict_{}
 	{ }
 
@@ -473,9 +526,14 @@ public:
 
 	void clear();
 
-	const BoxDatabase& boxDatabase() const
+	const BoxSet& boxDatabase() const
 	{
 		return boxes_;
+	}
+
+	BoxAntichain& boxAntichain()
+	{
+		return boxAntichain_;
 	}
 
 	size_t size() const
@@ -483,5 +541,4 @@ public:
 		return boxes_.size();
 	}
 };
-
 #endif

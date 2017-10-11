@@ -187,6 +187,25 @@ std::ostream& printUcodeTrace(
 
 	return os;
 }
+
+void dumpTrace(const SymState& state)
+{
+	std::vector<const SymState*> states;
+
+	for (const SymState* pState = &state; pState != nullptr; pState = static_cast<const SymState*>(pState->GetParent()))
+		states.push_back(pState);
+
+	for (int i = states.size() - 1; i >= 0; --i)
+	{
+		FA_DEBUG_AT(2, "TRACE " << states.size() - i);
+
+		if (nullptr != states[i]->GetInstr()->insn())
+			FA_DEBUG_AT(2, states[i]->GetInstr()->insn()->loc << *states[i]->GetInstr()->insn());
+
+		FA_DEBUG_AT(2, *states[i]);
+	}
+}
+
 } // namespace
 
 
@@ -495,6 +514,8 @@ protected:
 		{
 			reportRealError(insn, e);
 		}
+
+		dumpTrace(*e.state());
 
 		return shouldRefineAndContinue;
 	}

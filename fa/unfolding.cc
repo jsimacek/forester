@@ -211,22 +211,21 @@ bool Unfolding::updateBoxSignature(
 
 	bool changed = false;
 
+	for (auto& boxOriginPair : prevSignature)
+	{
+		auto iter = boxSignature.find(boxOriginPair.first);
+		if (iter == boxSignature.end() && (boxOriginPair.second != static_cast<size_t>(-1)))
+		{
+			boxOriginPair.second = static_cast<size_t>(-1);
+			changed = true;
+		}
+	}
+
 	for (auto& boxOriginPair : boxSignature)
 	{
 		auto itBoolPair2 = prevSignature.insert(boxOriginPair);
 
-		if (itBoolPair2.second)
-		{
-			changed = true;
-			continue;
-		}
-
-		assert(
-			boxOriginPair.second == itBoolPair2.first->second || boxOriginPair.second == static_cast<size_t>(-1) ||
-			itBoolPair2.first->second == static_cast<size_t>(-1)
-		);
-
-		if (boxOriginPair.second == static_cast<size_t>(-1) && itBoolPair2.first->second != static_cast<size_t>(-1))
+		if (itBoolPair2.second || (boxOriginPair.second != itBoolPair2.first->second && itBoolPair2.first->second != static_cast<size_t>(-1)))
 		{
 			itBoolPair2.first->second = static_cast<size_t>(-1);
 			changed = true;
@@ -282,7 +281,7 @@ void Unfolding::computeBoxSignatureMap(
 	stateMap.clear();
 
 	// the workset of transitions
-	std::list<const TreeAut::Transition*> transitions;
+	std::vector<TreeAut::Transition> transitions;
 
 	// compute the initial signatures for leaves, other signatures are cleared
 	for (auto trans : ta)
@@ -292,7 +291,7 @@ void Unfolding::computeBoxSignatureMap(
 			stateMap.insert(std::make_pair(trans.GetParent(), BoxSignature()));
 		} else
 		{	// for non-data transitions
-			transitions.push_back(&trans);
+			transitions.push_back(trans);
 		}
 	}
 
@@ -308,23 +307,23 @@ void Unfolding::computeBoxSignatureMap(
 		{
 			boxSignature.clear();
 
-			if (!processLhs(boxSignature, t->GetChildren(), stateMap))
+			if (!processLhs(boxSignature, t.GetChildren(), stateMap))
 			{	// in case this transition cannot be processed because of some downward
 				// states with missing box information
 				continue;
 			}
 
-			for (const AbstractBox* box : TreeAut::GetSymbol(*t)->getNode())
+			for (const AbstractBox* box : TreeAut::GetSymbol(t)->getNode())
 			{	// for all boxes in the label
 				assert(nullptr != box);
 
 				if (box->isBox())
 				{
-					joinBoxSignature(boxSignature, std::make_pair(static_cast<const Box*>(box), t->GetParent()));
+					joinBoxSignature(boxSignature, std::make_pair(static_cast<const Box*>(box), t.GetParent()));
 				}
 			}
 
-			changed |= updateBoxSignature(stateMap, t->GetParent(), boxSignature);
+			changed |= updateBoxSignature(stateMap, t.GetParent(), boxSignature);
 		}
 	}
 }
@@ -378,21 +377,39 @@ void Unfolding::unfoldSingletons(const size_t root)
 
 		for (auto boxStatePair : boxSignatureIter->second)
 		{
-			if (boxStatePair.second != static_cast<size_t>(-1))
+			if (boxStatePair.second != static_cast<size_t>(-1)/* && !ta.isFinalState(boxStatePair.second)*/ && (++ta.begin(boxStatePair.second) == ta.end(boxStatePair.second)))
 				stateToBoxSetMap.insert(std::make_pair(boxStatePair.second, std::set<const Box*>())).first->second.insert(boxStatePair.first);
 		}
 	}
 
+	if (stateToBoxSetMap.empty())
+		return;
+
+	FA_DEBUG_AT(3, "before split: " << std::endl << this->fae);
+
+	FA_DEBUG_AT(3, "splitting states (" << root << "): ");
+
 	std::vector<size_t> splittingStates;
 	for (auto stateBoxSetPair : stateToBoxSetMap)
-		splittingStates.push_back(stateBoxSetPair.first);
+	{
+		FA_DEBUG_AT(3, stateBoxSetPair.first);
+		//splittingStates.push_back(stateBoxSetPair.first);
+	}
 
 	std::vector<size_t> roots;
-	Splitting(this->fae).split(roots, root, splittingStates);
+	Splitting splitting(this->fae);
+
+	splitting.split(roots, root, stateToBoxSetMap);
+
+	FA_DEBUG_AT(3, "after split: " << std::endl << this->fae);
 
 	auto i = 0;
 	for (auto stateBoxSetPair : stateToBoxSetMap)
 	{
+//		splitting.isolateBoxesAtRoot(roots[i], stateBoxSetPair.second);
+
+		assert(this->fae.getRoot(roots[i]) != nullptr);
+
 		unfoldBoxes(roots[i], stateBoxSetPair.second);
 
 		++i;

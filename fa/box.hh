@@ -176,7 +176,7 @@ class Box : public StructuralBox
 {
 private:  // data types
 
-	friend class BoxMan;
+	friend class BoxSet;
 
 private:  // data members
 
@@ -195,6 +195,7 @@ private:  // data members
 	std::vector<std::set<size_t>> selCoverage_;
 
 	bool selfReference_;
+	bool symetric_;
 
 public:
 
@@ -374,6 +375,16 @@ public:
 		return selfReference_;
 	}
 
+	bool isSymetric() const
+	{
+		return symetric_;
+	}
+
+	void setSymetric(bool value)
+	{
+		symetric_ = value;
+	}
+
 public:
 
 
@@ -403,7 +414,9 @@ public:
 		const std::shared_ptr<TreeAut>&                  input,
 		size_t                                           inputIndex,
 		ConnectionGraph::CutpointSignature               inputSignature,
-		const std::vector<std::pair<size_t,size_t>>&     selectors);
+		const std::vector<std::pair<size_t,size_t>>&     selectors,
+		size_t						 level
+	);
 
 
 	virtual void toStream(std::ostream& os) const;

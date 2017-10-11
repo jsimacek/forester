@@ -240,6 +240,18 @@ struct IsolateAllF
 	}
 };
 
+struct IsolateBoxSetF
+{
+	const std::set<const Box*>& boxSet;
+
+	IsolateBoxSetF(const std::set<const Box*>& boxSet) : boxSet(boxSet) {}
+
+	bool operator()(const StructuralBox* box) const
+	{
+		return box->isBox() ? boxSet.count(static_cast<const Box*>(box)) > 0 : false;
+	}
+};
+
 } // namespace
 
 
@@ -585,16 +597,26 @@ void Splitting::isolateAtRoot(
 }
 
 
-void Splitting::split(std::vector<size_t>& newRoots, size_t root, const std::vector<size_t>& targetStates)
+void Splitting::split(std::vector<size_t>& newRoots, size_t root, const std::unordered_map<size_t, std::set<const Box*>>& targetStateMap)
 {
 	// Assertions
 	assert(root < this->fae_.getRootCount());
 	assert(nullptr != this->fae_.getRoot(root));
 
+	this->fae_.connectionGraph.invalidate(root);
+
 	std::vector<size_t> workingSet = { root };
 
-	for (auto targetState : targetStates)
+	size_t originalRootCount = this->fae_.getRootCount();
+
+	std::vector<size_t> lhs;
+
+	std::unordered_map<size_t, TreeAut*> fakeRefStatesMap;
+
+	for (auto targetStateBoxSetPair : targetStateMap)
 	{
+		auto targetState = targetStateBoxSetPair.first;
+
 		root = static_cast<size_t>(-1);
 
 		for (auto r : workingSet)
@@ -615,38 +637,207 @@ void Splitting::split(std::vector<size_t>& newRoots, size_t root, const std::vec
 
 		topTA.addFinalStates(ta.getFinalStates());
 
-		size_t state = fae_.addData(topTA, Data::createRef(this->fae_.getRootCount()));
+		// temporary leaf transition (inconsistent state)
+		label_type label = this->fae_.getBoxMan()->lookupLabel(Data::createRef(this->fae_.getRootCount()));
+		topTA.addTransition(std::vector<size_t>(), label, targetState);
 
-		std::vector<size_t> lhs;
+		fakeRefStatesMap.insert(std::make_pair(targetState, &topTA));
+
+		// a new component for the transition containing the box to be unfolded
+		TreeAut middleTA = TreeAut::createTAWithSameTransitions(ta);
+		middleTA.addFinalState(targetState);
+
+		std::vector<TreeAut> bottomTAs;
+
 		for (auto t : ta)
 		{
-			lhs.resize(t.GetChildren().size());
+			if (t.GetParent() == targetState)
+			{
+				bool containsSingletonBox = false;
 
-			std::replace_copy(
-				t.GetChildren().begin(), t.GetChildren().end(), lhs.begin(), targetState, state
-			);
+				for (const AbstractBox* box : TreeAut::GetSymbol(t)->getNode())
+				{
+					if (!box->isBox())
+						continue;
 
-			topTA.addTransition(lhs, TreeAut::GetSymbol(t), t.GetParent());
+					if (targetStateBoxSetPair.second.count(static_cast<const Box*>(box)) == 0)
+						continue;
+
+					containsSingletonBox = true;
+					break;
+				}
+
+				if (containsSingletonBox)
+				{
+					lhs = t.GetChildren();
+					for (size_t i = 0; i < lhs.size(); ++i)
+					{
+						if (FA::isData(lhs[i]))
+							continue;
+
+						auto stateAutPairIt = fakeRefStatesMap.find(lhs[i]);
+						if (stateAutPairIt != fakeRefStatesMap.end() && stateAutPairIt->second == &ta)
+							continue;
+
+						size_t rootIndex = this->fae_.getRootCount() + bottomTAs.size() + 1 /* topTA & middleTA offset */;
+
+						bottomTAs.push_back(TreeAut::createTAWithSameTransitions(ta));
+						bottomTAs.back().addFinalState(lhs[i]);
+
+						lhs[i] = this->fae_.addData(middleTA, Data::createRef(rootIndex));
+					}
+
+					middleTA.addTransition(lhs, TreeAut::GetSymbol(t), t.GetParent());
+				}
+				else
+				{
+					topTA.addTransition(t.GetChildren(), TreeAut::GetSymbol(t), t.GetParent());
+				}
+			}
+			else
+			{
+				topTA.addTransition(t.GetChildren(), TreeAut::GetSymbol(t), t.GetParent());
+				middleTA.addTransition(t.GetChildren(), TreeAut::GetSymbol(t), t.GetParent());
+			}
 		}
 
 		// exchange the original automaton with the new one
 		TreeAut* tmp = fae_.allocTA();
-		topTA.unreachableFree(*tmp);
+		topTA.uselessAndUnreachableFree(*tmp);
 		this->fae_.setRoot(root, std::shared_ptr<TreeAut>(tmp));
-		this->fae_.connectionGraph.invalidate(root);
-
-		// a new component representing trees accepted by the target state
-		TreeAut bottomTA = TreeAut::createTAWithSameFinalStates(ta, false);
-		bottomTA.addFinalState(targetState);
 
 		tmp = fae_.allocTA();
-		bottomTA.unreachableFree(*tmp);
+		middleTA.unreachableFree(*tmp);
 		this->fae_.appendRoot(tmp);
-		this->fae_.makeDisjoint(this->fae_.getRootCount() - 1);
 		this->fae_.connectionGraph.newRoot();
 
-		workingSet.push_back(fae_.getRootCount());
-		newRoots.push_back(fae_.getRootCount());
+		workingSet.push_back(fae_.getRootCount() - 1);
+		newRoots.push_back(fae_.getRootCount() - 1);
+
+		for (auto bottomTA : bottomTAs)
+		{
+			for (auto t : ta)
+			{
+				if (t.GetParent() != targetState)
+					bottomTA.addTransition(t.GetChildren(), TreeAut::GetSymbol(t), t.GetParent());
+			}
+
+			tmp = fae_.allocTA();
+			bottomTA.unreachableFree(*tmp);
+			this->fae_.appendRoot(tmp);
+			this->fae_.connectionGraph.newRoot();
+
+			workingSet.push_back(fae_.getRootCount() - 1);
+		}
+
+		FA_DEBUG_AT(3, "inter split: " << std::endl << this->fae_);
+	}
+
+	bool relabel = false;
+
+	std::vector<size_t> index(fae_.getRootCount());
+
+	for (size_t i = 0; i < fae_.getRootCount(); ++i)
+		index[i] = i;
+
+	// replace temporary leaf transitions with proper ones
+	for (auto root : workingSet)
+	{
+		size_t refState;
+		const Data* refData = nullptr;
+
+		auto ta = *this->fae_.getRoot(root);
+
+		size_t transitionCount = 0;
+
+		for (auto t : ta)
+		{
+			// is this temporary leaf transition?
+			if (!FA::isData(t.GetParent()) && TreeAut::GetSymbol(t)->isData())
+			{
+				FA_DEBUG_AT(3, "temporary leaf transition found at state " << t.GetParent());
+
+				assert(refData == nullptr);
+
+				assert(TreeAut::GetSymbol(t)->getData().isRef());
+
+				refState = t.GetParent();
+				refData = &TreeAut::GetSymbol(t)->getData();
+			}
+
+			++transitionCount;
+		}
+
+		if (!refData)
+			continue;
+
+		if (transitionCount == 1)
+		{
+			fae_.setRoot(root, std::shared_ptr<TreeAut>(nullptr));
+
+			index[root] = refData->d_ref.root;
+
+			relabel = true;
+
+			continue;
+		}
+
+		TreeAut newTA = TreeAut::createTAWithSameTransitions(ta);
+
+		size_t state = fae_.addData(newTA, *refData);
+
+		newTA.addFinalStates(ta.getFinalStates());
+
+		if (ta.isFinalState(refState))
+			newTA.addFinalState(state);
+
+		for (auto t : ta)
+		{
+			if (!FA::isData(t.GetParent()) && TreeAut::GetSymbol(t)->isData())
+				continue;
+
+			newTA.addTransition(t.GetChildren(), TreeAut::GetSymbol(t), t.GetParent());
+
+			lhs.resize(t.GetChildren().size());
+
+			std::replace_copy(t.GetChildren().begin(), t.GetChildren().end(), lhs.begin(), refState, state);
+
+			newTA.addTransition(lhs, TreeAut::GetSymbol(t), t.GetParent());
+		}
+
+		TreeAut* tmp = fae_.allocTA();
+		newTA.uselessAndUnreachableFree(*tmp);
+		this->fae_.setRoot(root, std::shared_ptr<TreeAut>(tmp));
+		this->fae_.connectionGraph.invalidate(root);
+	}
+
+	if (relabel)
+	{
+		for (size_t i = 0; i < fae_.getRootCount(); ++i)
+		{
+			if (fae_.getRoot(i) == nullptr)
+				continue;
+
+			fae_.setRoot(i, std::shared_ptr<TreeAut>(fae_.relabelReferences(&*fae_.getRoot(i), index)));
+
+			if (!fae_.connectionGraph.data[i].valid)
+				continue;
+
+			ConnectionGraph::renameSignature(fae_.connectionGraph.data[i].signature, index);
+
+			for (auto& selectorRootPair : fae_.connectionGraph.data[i].bwdMap)
+			{
+				assert(selectorRootPair.second < index.size());
+
+				selectorRootPair.second = index[selectorRootPair.second];
+			}
+		}
+	}
+
+	for (size_t i = originalRootCount; i < this->fae_.getRootCount(); ++i)
+	{
+		if (this->fae_.getRoot(i) != nullptr)
+			this->fae_.makeDisjoint(i);
 	}
 }
 
@@ -793,4 +984,13 @@ void Splitting::isolateSet(
 
 	g.release();
 	f.release();
+}
+
+void Splitting::isolateBoxesAtRoot(size_t root, const std::set<const Box*>& boxes)
+{
+	std::set<const Box*> tmp;
+
+	isolateAtRoot(root, this->fae_.getRoot(root)->getAcceptingTransition(), IsolateBoxSetF(boxes), tmp);
+
+	assert(boxes == tmp);
 }

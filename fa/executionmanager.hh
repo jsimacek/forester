@@ -186,6 +186,9 @@ public:
 		SymState* state = createState();
 
 		state->init(parent, instr, fae, registers);
+
+		FA_DEBUG_AT(3, "enqueing {" << state << "}");
+
 		queue_.push_back(state);
 
 		return state;
@@ -196,6 +199,8 @@ public:
 	{
 		// Assertions
 		assert(nullptr != state);
+
+		FA_DEBUG_AT(3, "enqueing {" << state << "}");
 
 		queue_.push_back(state);
 		return state;

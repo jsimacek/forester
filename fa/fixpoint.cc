@@ -70,6 +70,11 @@ std::vector<size_t> findSelectors(
 
 struct SmartTMatchF
 {
+public:
+	SmartTMatchF()
+	{
+	}
+
 	bool operator()(
 		const TreeAut::Transition&  t1,
 		const TreeAut::Transition&  t2)
@@ -85,6 +90,7 @@ struct SmartTMatchF
 					return l1 == l2;
 				}
 			}
+
 			return l1->getTag() == l2->getTag();
 		}
 
@@ -291,17 +297,77 @@ void FixpointBase::initFoldedRoots()
 }
 
 
-size_t FixpointBase::fold(
-		const std::shared_ptr<FAE>&       fae,
-		std::set<size_t>&                 forbidden)
+void FI_abs::preFold(Folding::StateToBoxInfoMap& stateToBoxInfoMap, const std::shared_ptr<FAE>& src)
 {
-	iterationToFoldedRoots_[abstrIteration_] =
-			BoxesAtRoot(Folding::fold(*fae, boxMan_, forbidden));
-	++abstrIteration_;
+	FAE fae(*src);
 
-	return iterationToFoldedRoots_.at(abstrIteration_ - 1).size();
+	FA_DEBUG_AT(3, "before pre-folding: " << std::endl << fae);
+
+	std::set<size_t> forbidden = Normalization::computeForbiddenSet(fae);
+
+	size_t level = 2;
+
+#if FA_BOX_APPROXIMATION
+	auto foldResult = Folding::fold(fae, boxMan_, boxAntichain_, forbidden, level, true, true, stateToBoxInfoMap).second;
+#else
+	auto foldResult = Folding::fold(fae, boxMan_, forbidden, level, true, true, stateToBoxInfoMap).second;
+#endif
+
+	FAE old(fae, boxMan_);
+
+	do
+	{
+		forbidden = Normalization::computeForbiddenSet(fae);
+
+		Normalization::normalize(fae, nullptr, forbidden, false);
+
+		abstract(fae);
+
+		forbidden.clear();
+		for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
+			forbidden.insert(VirtualMachine(fae).varGet(i).d_ref.root);
+
+		old = fae;
+
+#if FA_BOX_APPROXIMATION
+		foldResult = Folding::fold(fae, boxMan_, boxAntichain_, forbidden, level++, false, true, stateToBoxInfoMap).second;
+#else
+		foldResult = Folding::fold(fae, boxMan_, forbidden, level++, false, true, stateToBoxInfoMap).second;
+#endif
+	}
+	while (foldResult && !FAE::subseteq(fae, old));
+
+	FA_DEBUG_AT(3, "after pre-folding: " << std::endl << fae);
+
+	for (size_t root = 0; root < fae.getRootCount(); ++root)
+		Folding::analyzeBoxes(stateToBoxInfoMap, *fae.getRoot(root));
+
+	for (auto& stateBoxInfoPair : stateToBoxInfoMap)
+	{
+		FA_DEBUG_AT(3, "box analysis at state: " << stateBoxInfoPair.first);
+		for (auto& boxBoolPair : stateBoxInfoPair.second)
+			FA_DEBUG_AT(3, boxBoolPair.first->getName() << ": " << boxBoolPair.second);
+	}
 }
 
+
+bool FixpointBase::fold(
+	const std::shared_ptr<FAE>&       fae,
+	std::set<size_t>&                 forbidden,
+	size_t				  level,
+	bool				  discover3only,
+	Folding::StateToBoxInfoMap&	  stateToBoxInfoMap)
+{
+#if FA_BOX_APPROXIMATION
+	auto foldResult = Folding::fold(*fae, boxMan_, boxAntichain_, forbidden, level, discover3only, false, stateToBoxInfoMap);
+#else
+	auto foldResult = Folding::fold(*fae, boxMan_, forbidden, level, discover3only, false, stateToBoxInfoMap);
+#endif
+	iterationToFoldedRoots_[abstrIteration_] = foldResult.first;
+	++abstrIteration_;
+
+	return foldResult.second;
+}
 
 
 SymState* FixpointBase::reverseAndIsect(
@@ -365,6 +431,27 @@ SymState* FixpointBase::reverseAndIsect(
 	return tmpState;
 }
 
+void FixpointBase::fixpoint(ExecutionManager& execMan, SymState& state, std::shared_ptr<FAE> fae)
+{
+	fae->updateConnectionGraph();
+
+	Normalization::normalize(*fae, &state, Normalization::computeForbiddenSet(*fae), true);
+
+	if (testInclusion(*fae, fwdConf_, fwdConfWrapper_))
+	{
+		FA_DEBUG_AT(3, "hit");
+
+		execMan.pathFinished(&state);
+	} else
+	{
+		FA_DEBUG_AT(1, "extending fixpoint\n" << *fae);
+
+		SymState* tmpState = execMan.createChildState(state, next_);
+		tmpState->SetFAE(fae);
+
+		execMan.enqueue(tmpState);
+	}
+}
 
 void FI_abs::abstract(
 	FAE&                 fae)
@@ -408,6 +495,7 @@ void FI_abs::abstract(
 	}
 	else
 	{	// for finite height abstraction
+		FA_DEBUG_AT(1,"Height abstraction of height " << FA_ABS_HEIGHT);
 
 		// the roots that will be excluded from abstraction
 		std::vector<bool> excludedRoots(fae.getRootCount(), false);
@@ -421,6 +509,7 @@ void FI_abs::abstract(
 			if (!excludedRoots[i])
 			{
 				abstraction.heightAbstraction(i, FA_ABS_HEIGHT, SmartTMatchF());
+
 //				abstraction.heightAbstraction(i, FA_ABS_HEIGHT, SmarterTMatchF(fae));
 			}
 		}
@@ -439,145 +528,63 @@ void FI_abs::execute(ExecutionManager& execMan, SymState& state)
 
 	fae->updateConnectionGraph();
 
-	std::set<size_t> forbidden;
-#if FA_ALLOW_FOLDING
-	// reorder components into the canonical form (no merging!)
-	reorder(&state, *fae);
+	std::set<size_t> forbidden = Normalization::computeForbiddenSet(*fae);
 
-	if (!boxMan_.boxDatabase().empty())
-	{	// in the case there are some boxes, try to fold immediately before
-		// normalization
+	Normalization::normalizeWithoutMerging(*fae, &state, forbidden, false);
+
+	Folding::StateToBoxInfoMap stateToBoxInfoMap;
+
+#if FA_ALLOW_FOLDING
+//	this->preFold(stateToBoxInfoMap, fae);
+
+	this->fold(fae, forbidden, 2, true, stateToBoxInfoMap);
+#endif
+
+	FAE old(*fae, boxMan_);
+
+	size_t level = 2;
+
+	do
+	{
+		forbidden = Normalization::computeForbiddenSet(*fae);
+
+		Normalization::normalize(*fae, &state, forbidden, false);
+
+		faeAtIteration_[abstrIteration_] = std::shared_ptr<FAE>(new FAE(*fae));
+
+		abstract(*fae);
+
+		forbidden.clear();
 		for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
-		{
 			forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
-		}
 
-		// fold already discovered boxes
-		this->fold(fae, forbidden);
+		old = *fae;
 	}
-
-	Folding::learn2(*fae, boxMan_, Normalization::computeForbiddenSet(*fae));
-#endif
-	forbidden = Normalization::computeForbiddenSet(*fae);
-
-	Normalization::normalize(*fae, &state, forbidden, true);
-
-	abstract(*fae);
 #if FA_ALLOW_FOLDING
-	Folding::learn1(*fae, boxMan_, Normalization::computeForbiddenSet(*fae));
-
-	if (boxMan_.boxDatabase().size())
-	{
-		FAE old(*fae, boxMan_);
-
-		do
-		{
-			forbidden = Normalization::computeForbiddenSet(*fae);
-
-			Normalization::normalize(*fae, &state, forbidden, true);
-
-			faeAtIteration_[abstrIteration_] = std::shared_ptr<FAE>(
-					new FAE(*fae));
-
-			abstract(*fae);
-
-			forbidden.clear();
-			for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
-			{
-				forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
-			}
-
-			old = *fae;
-
-
-		} while (this->fold(fae, forbidden) && !FAE::subseteq(*fae, old));
-
-	}
+	while (this->fold(fae, forbidden, level++, false, stateToBoxInfoMap) && !FAE::subseteq(*fae, old));
+#else
+	while (false);
 #endif
-	// test inclusion
-	if (testInclusion(*fae, fwdConf_, fwdConfWrapper_))
+
+	FA_DEBUG_AT(3, "after folding: " << std::endl << *fae);
+
+	for (size_t root = 0; root < fae->getRootCount(); ++root)
 	{
-		FA_DEBUG_AT(3, "hit");
-
-		execMan.pathFinished(&state);
-	} else
-	{
-		FA_DEBUG_AT_MSG(1, &this->insn()->loc, "extending fixpoint\n" << *fae);
-
-		SymState* tmpState = execMan.createChildState(state, next_);
-		tmpState->SetFAE(fae);
-
-		execMan.enqueue(tmpState);
+		if (fae->getRoot(root) != nullptr)
+			Unfolding(*fae).unfoldSingletons(root);
 	}
-	FA_DEBUG_AT_MSG(1, &this->insn()->loc, "AbsInt end " << *fae);
+
+	FA_DEBUG_AT(3, "after unfolding: " << std::endl << *fae);
+
+//	FA_DEBUG_AT_MSG(1, &this->insn()->loc, "AbsInt end " << *fae);
+
+	fixpoint(execMan, state, fae);
 }
 
 // FI_fix
 void FI_fix::execute(ExecutionManager& execMan, SymState& state)
 {
-	this->initFoldedRoots();
-
-	std::shared_ptr<FAE> fae = std::shared_ptr<FAE>(new FAE(*(state.GetFAE())));
-
-	fae->updateConnectionGraph();
-
-	std::set<size_t> forbidden;
-#if FA_ALLOW_FOLDING
-	reorder(&state, *fae);
-
-	if (!boxMan_.boxDatabase().size())
-	{
-		for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
-		{
-			forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
-		}
-
-		this->fold(fae, forbidden);
-	}
-#endif
-	forbidden = Normalization::computeForbiddenSet(*fae);
-
-	Normalization::normalize(*fae, &state, forbidden, true);
-#if FA_ALLOW_FOLDING
-	if (boxMan_.boxDatabase().size())
-	{
-		forbidden.clear();
-
-		for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
-		{
-			forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
-		}
-
-		while (this->fold(fae, forbidden))
-		{
-			forbidden = Normalization::computeForbiddenSet(*fae);
-
-			Normalization::normalize(*fae, &state, forbidden, true);
-
-			forbidden.clear();
-
-			for (size_t i = 0; i < FIXED_REG_COUNT; ++i)
-			{
-				forbidden.insert(VirtualMachine(*fae).varGet(i).d_ref.root);
-			}
-		}
-	}
-#endif
-	// test inclusion
-	if (testInclusion(*fae, fwdConf_, fwdConfWrapper_))
-	{
-		FA_DEBUG_AT(3, "hit");
-
-		execMan.pathFinished(&state);
-	} else
-	{
-		FA_DEBUG_AT_MSG(1, &this->insn()->loc, "extending fixpoint\n" << *fae);
-
-		SymState* tmpState = execMan.createChildState(state, next_);
-		tmpState->SetFAE(fae);
-
-		execMan.enqueue(tmpState);
-	}
+	fixpoint(execMan, state, std::shared_ptr<FAE>(new FAE(*(state.GetFAE()))));
 }
 
 void FI_abs::printDebugInfoAboutPredicates() const

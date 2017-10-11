@@ -29,6 +29,7 @@
 #include "fixpointinstruction.hh"
 #include "forestautext.hh"
 #include "ufae.hh"
+#include "folding.hh"
 
 /**
  * @brief  The base class for fixpoint instructions
@@ -54,6 +55,10 @@ protected:
 
 	BoxMan &boxMan_;
 
+#if FA_BOX_APPROXIMATION
+	BoxAntichain boxAntichain_;
+#endif
+
 	size_t abstrIteration_;
 
 	BoxesAtIteration iterationToFoldedRoots_;
@@ -63,9 +68,14 @@ protected:
 protected:
 
 	void initFoldedRoots();
-	size_t fold(
+	bool fold(
 			const std::shared_ptr<FAE>&  fae,
-			std::set<size_t>&            forbidden);
+			std::set<size_t>&            forbidden,
+			size_t			     level,
+			bool				  discover3only,
+			Folding::StateToBoxInfoMap&	  stateToBoxInfoMap);
+
+	void fixpoint(ExecutionManager& execMan, SymState& state, std::shared_ptr<FAE> fae);
 
 public:
 
@@ -122,6 +132,9 @@ public:
 		fixpoint_{},
 		ta_(ta),
 		boxMan_(boxMan),
+#if FA_BOX_APPROXIMATION
+		boxAntichain_(boxMan),
+#endif
 		abstrIteration_(0),
 		iterationToFoldedRoots_(),
 		faeAtIteration_()
@@ -166,6 +179,8 @@ private:  // methods
 	 */
 	void abstract(
 		FAE&             fae);
+
+	void preFold(Folding::StateToBoxInfoMap& stateToBoxInfoMap, const std::shared_ptr<FAE>& src);
 
 public:   // methods
 

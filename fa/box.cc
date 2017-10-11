@@ -133,7 +133,8 @@ Box::Box(
 	const std::shared_ptr<TreeAut>&                    input,
 	size_t                                             inputIndex,
 	ConnectionGraph::CutpointSignature                 inputSignature,
-	const std::vector<std::pair<size_t,size_t>>&       selectors
+	const std::vector<std::pair<size_t,size_t>>&       selectors,
+	size_t						   level
 ) :
 	StructuralBox(box_type_e::bBox, selectors.size()),
 	name_(name),
@@ -148,8 +149,11 @@ Box::Box(
 	inputLabels_(),
 	selectors_(selectors),
 	selCoverage_{},
-	selfReference_{}
+	selfReference_{},
+	symetric_{}
 {
+	this->level_ = level;
+
 	Box::getAcceptingLabels(outputLabels_, *output_);
 
 	boost::hash_combine(hint_, selectors_);
@@ -340,7 +344,7 @@ void Box::initialize()
 
 std::ostream& operator<<(std::ostream& os, const Box& box)
 {
-	os << "BOX " << box.name_ << "\n";
+	os << "BOX " << box.name_ << "(level " << box.level_ << ")" << "\n";
     /*/
 	auto writeStateF = [](size_t state) -> std::string {
 
@@ -419,7 +423,7 @@ std::ostream& operator<<(std::ostream& os, const Box& box)
 
 void Box::toStream(std::ostream& os) const
 {
-	os << name_ << '(' << arity_ << ")[in=";
+	os << name_ << '(' << arity_ << "," << level_ << ")[in=";
 
 	// coverage of the input port
 	for (auto it = this->outputCoverage().cbegin(); it != this->outputCoverage().cend(); ++it)

@@ -72,18 +72,31 @@ TreeAut* Normalization::mergeRoot(
 	// Assertions
 	assert(rootRef < this->fae.getRootCount());
 
+	assert(src.getFinalStates().size() == 1);
+
 	std::unordered_map<size_t, size_t> joinStatesMap;
 	for (const size_t finState : src.getFinalStates())
 	{
-		joinStates.push_back(this->fae.nextState());
-		joinStatesMap.insert(std::make_pair(finState, this->fae.freshState()));
+//		joinStates.push_back(this->fae.nextState());
+//		joinStatesMap.insert(std::make_pair(finState, this->fae.freshState()));
+		joinStates.push_back(finState);
+		joinStatesMap.insert(std::make_pair(finState, finState));
 	}
 
 	TreeAut* resTA = this->fae.allocTA();
-	resTA->addFinalStates(dst.getFinalStates());
+	auto finalStates = dst.getFinalStates();
 	size_t rootRefState = _MSB_ADD(this->fae.boxMan->getDataId(Data::createRef(rootRef)));
-	
+
 	bool hit = false;
+	if (dst.getFinalStates().count(rootRefState))
+	{
+		hit = true;
+		finalStates.erase(rootRefState);
+		finalStates.insert(src.getFinalStates().begin(), src.getFinalStates().end());
+	}
+
+	resTA->addFinalStates(finalStates);
+
 	for (const auto& trans : dst)
 	{
 		if (containsRootRef(trans.GetChildren(), rootRefState))
@@ -104,8 +117,13 @@ TreeAut* Normalization::mergeRoot(
 	
 	// the new TA should have the same final states as dst TA
 	// so at least number of the states is checked. 
-	assert(resTA->getFinalStates().size() == dst.getFinalStates().size());
-	return resTA;
+//	assert(resTA->getFinalStates().size() == dst.getFinalStates().size());
+
+	TreeAut* tmp = this->fae.allocTA();
+	resTA->unreachableFree(*tmp);
+	delete resTA;
+
+	return tmp;
 }
 
 
@@ -315,6 +333,19 @@ bool Normalization::normalizeInternal(
 	return merged;
 }
 
+bool Normalization::hasAcceptingLeafTransitions()
+{
+	for (size_t i = 0; i < this->fae.getRootCount(); ++i)
+	{
+		for (auto state : this->fae.getRoot(i)->getFinalStates())
+		{
+			if (FA::isData(state))
+				return true;
+		}
+	}
+	return false;
+}
+
 bool Normalization::normalize(
 		FAE&                              fae,
 		const SymState*                   state,
@@ -331,6 +362,8 @@ bool Normalization::normalize(
 	bool result = norm.normalizeInternal(marked, order);
 
 	FA_DEBUG_AT(3, "after normalization: " << std::endl << fae);
+
+	assert(!norm.hasAcceptingLeafTransitions());
 
 	return result;
 }
@@ -355,6 +388,8 @@ bool Normalization::normalizeWithoutMerging(
 	bool result = norm.normalizeInternal(marked, order);
 
 	FA_DEBUG_AT(3, "after normalization: " << std::endl << fae);
+
+	assert(!norm.hasAcceptingLeafTransitions());
 
 	return result;
 }

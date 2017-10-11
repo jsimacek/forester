@@ -288,8 +288,10 @@ const ConnectionGraph::StateToCutpointSignatureMap& Folding::getSignatures(
 bool Folding::discover1(
 	size_t                       root,
 	const std::set<size_t>&      forbidden,
-	bool                         conditional,
-	std::vector<const Box*>*     discoveredBoxes)
+	size_t			     level,
+	bool                         analysis,
+	StateToBoxInfoMap& 	     stateToBoxInfoMap,
+	std::vector<const Box *>*     discoveredBoxes)
 {
 	// Preconditions
 	assert(fae_.getRootCount() == fae_.connectionGraph.data.size());
@@ -320,20 +322,26 @@ dis1_start:
 
 		FA_DEBUG_AT(3, "type 1 cutpoint detected at root " << root);
 
-		const Box* boxPtr = this->makeBox1Component(
+		auto result = this->makeBox1Component(
 				/* index of the TA to be folded */ root,
 				/* the state where to fold */ fae_.getRoot(root)->getFinalState(),
 				/* index of the other TA to be folded */ root,
 				/* set of cutpoints with forbidden folding */ forbidden,
-				/* if true do not create the box if not present */ conditional
+				/* box level to be discovered */ level,
+				/* if true do not create the box if not present */ analysis,
+				stateToBoxInfoMap
 		);
 
-		if (nullptr != boxPtr)
-		{	// in the case folding was successful
+		if (result.second)
+		{
 			found = true;
+		}
+
+		if (nullptr != result.first)
+		{	// in the case folding was successful
 			if (discoveredBoxes != nullptr)
 			{
-				discoveredBoxes->push_back(boxPtr);
+				discoveredBoxes->push_back(result.first);
 			}
 
 			goto dis1_start;
@@ -345,11 +353,22 @@ dis1_start:
 	return found;
 }
 
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::unordered_set<T>& s)
+{
+	for (const T& v : s)
+		os << v << ",";
+
+	return os;
+}
+
 
 bool Folding::discover2(
 	size_t                       root,
 	const std::set<size_t>&      forbidden,
-	bool                         conditional,
+	size_t			     level,
+	bool                         analysis,
+	StateToBoxInfoMap& 	    stateToBoxInfoMap,
 	std::vector<const Box *>     *discoveredBoxes)
 {
 	// Preconditions
@@ -372,6 +391,10 @@ dis2_start:
 
 	fae_.updateConnectionGraph();
 
+	// the signatures of all states in the automaton
+	const ConnectionGraph::StateToCutpointSignatureMap& signatures =
+		this->getSignatures(root);
+
 	for (const ConnectionGraph::CutpointInfo& cutpoint : sign)
 	{
 		if (cutpoint.refCount < 2)
@@ -379,9 +402,7 @@ dis2_start:
 			continue;
 		}
 
-		// the signatures of all states in the automaton
-		const ConnectionGraph::StateToCutpointSignatureMap& signatures =
-			this->getSignatures(root);
+		std::unordered_set<size_t> candidateStates;
 
 		for (const std::pair<size_t, ConnectionGraph::CutpointSignature>&
 			stateSignaturePair : signatures)
@@ -395,30 +416,82 @@ dis2_start:
 					continue;
 				}
 
-				FA_DEBUG_AT(3, "type 2 cutpoint detected inside component " << root
-					<< " at state q" << stateSignaturePair.first);
+				candidateStates.insert(stateSignaturePair.first);
+			}
+		}
 
-				const Box* boxPtr = this->makeBox1Component(
-						/* index of the TA to be folded */ root,
-						/* the state where to fold */ stateSignaturePair.first,
-						/* index of the other TA to be folded */ cutpoint.root,
-						/* set of cutpoints with forbidden folding */ forbidden,
-						/* if true do not create the box if not present */ conditional
-				);
+		FA_DEBUG_AT(3, "candidate states: " << candidateStates);
 
-				if (nullptr != boxPtr)
-				{	// in the case folding was successful
-					found = true;
-					if (discoveredBoxes != nullptr)
+		if (candidateStates.size() > 1)
+		{
+			auto ta = fae_.getRoot(root);
+
+			std::unordered_set<size_t> visited;
+			std::vector<size_t> stack(candidateStates.begin(), candidateStates.end());
+
+			while (!stack.empty())
+			{
+				size_t state = stack.back();
+
+				stack.pop_back();
+
+				if (visited.count(state) > 0)
+					continue;
+
+				visited.insert(state);
+
+				FA_DEBUG_AT(3, "processing: " << state);
+
+				for (auto transitionIter = ta->begin(state); transitionIter != ta->end(state); ++transitionIter)
+				{
+					const Transition& t = *transitionIter;
+
+					for (size_t child : t.GetChildren())
 					{
-						discoveredBoxes->push_back(boxPtr);
-					}
+						if (_MSB_TEST(child))
+						{/* leaf state */
+							continue;
+						}
 
-					goto dis2_start;
+						FA_DEBUG_AT(3, "erasing: " << child);
+
+						candidateStates.erase(child);
+					}
+				}
+			}
+		}
+
+		for (size_t state : candidateStates)
+		{
+			FA_DEBUG_AT(3, "type 2 cutpoint detected inside component " << root
+					<< " at state q" << state);
+
+			auto result = this->makeBox1Component(
+					/* index of the TA to be folded */ root,
+					/* the state where to fold */ state,
+					/* index of the other TA to be folded */ cutpoint.root,
+					/* set of cutpoints with forbidden folding */ forbidden,
+					/* box level to be discovered */ level,
+					/* if true do not create the box if not present */ analysis,
+					stateToBoxInfoMap
+			);
+
+			if (result.second)
+			{
+				found = true;
+			}
+
+			if (nullptr != result.first)
+			{	// in the case folding was successful
+				if (discoveredBoxes != nullptr)
+				{
+					discoveredBoxes->push_back(result.first);
 				}
 
-				fae_.popStateOffset();
+				goto dis2_start;
 			}
+
+			fae_.popStateOffset();
 		}
 	}
 
@@ -429,8 +502,10 @@ dis2_start:
 bool Folding::discover3(
 	size_t                      root,
 	const std::set<size_t>&     forbidden,
-	bool                        conditional,
-	std::vector<const Box *> *discoveredBoxes)
+	size_t			    level,
+	bool                        analysis,
+	StateToBoxInfoMap& 	    stateToBoxInfoMap,
+	std::vector<const Box *>    *discoveredBoxes)
 {
 	// Preconditions
 	assert(fae_.getRootCount() == fae_.connectionGraph.data.size());
@@ -459,6 +534,11 @@ dis3_start:
 			continue;
 		}
 
+		if (root == cutpoint.root)
+		{
+			continue;
+		}
+
 		// retrieve the selector from 'cutpoint.root' that reaches 'root'
 		size_t selectorToRoot = ConnectionGraph::getSelectorToTarget(
 			fae_.connectionGraph.data[cutpoint.root].signature, root
@@ -471,32 +551,44 @@ dis3_start:
 
 		assert(!cutpoint.fwdSelectors.empty());
 
-		if (this->makeBox2Components(
+		auto result = this->makeBox2Components(
 				/* index of the TA to be folded */ cutpoint.root,
 				/* index of the other TA to be folded */ root,
 				/* set of cutpoints with forbidden folding */ forbidden,
-				/* if true do not create the box if not present */ true,
-				/* only testing that we can make the box? */ true))
+				/* box level to be discovered */ level,
+				analysis,
+				stateToBoxInfoMap,
+				/* only testing that we can make the box? */ true);
+
+		if (result.second && result.first != nullptr && !result.first->isSymetric())
 		{	// in the case the box can be created in the reverse way
+			FA_DEBUG_AT(3, "skipping reversed type 3 cutpoint at roots " << root << " and "
+				<< cutpoint.root);
 			continue;
 		}
 
 		FA_DEBUG_AT(3, "type 3 cutpoint detected at roots " << root << " and "
 			<< cutpoint.root);
 
-		const Box* boxPtr = this->makeBox2Components(
+		result = this->makeBox2Components(
 				/* index of the TA to be folded */ root,
 				/* index of the other TA to be folded */ cutpoint.root,
 				/* set of cutpoints with forbidden folding */ forbidden,
-				/* if true do not create the box if not present */ conditional
+				/* box level to be discovered */ level,
+				/* if true do not create the box if not present */ analysis,
+				stateToBoxInfoMap
 		);
 
-		if (nullptr != boxPtr)
-		{	// in the case folding was successful
+		if (result.second)
+		{
 			found = true;
+		}
+
+		if (nullptr != result.first)
+		{	// in the case folding was successful
 			if (discoveredBoxes != nullptr)
 			{
-				discoveredBoxes->push_back(boxPtr);
+				discoveredBoxes->push_back(result.first);
 			}
 
 			goto dis3_start;
@@ -648,13 +740,33 @@ void Folding::componentCut(
 	}
 }
 
+size_t Folding::getNestingLevel(const TreeAut& ta)
+{
+	size_t level = 0;
+	for (auto t = ta.begin(); t != ta.end(); ++t)
+	{
+		auto label = TreeAut::GetSymbol(*t);
+		if (!label->isNode())
+		{
+			continue;
+		}
 
-const Box* Folding::makeBox1Component(
+		for (auto b = label->getNode().begin(); b != label->getNode().end(); ++b)
+			level = std::max(level, (*b)->getLevel());
+	}
+
+	return level;
+}
+
+
+std::pair<const Box*, bool> Folding::makeBox1Component(
 		size_t root,
 		size_t state,
 		size_t aux,
 		const std::set<size_t> &forbidden,
-		bool conditional,
+		size_t level,
+		bool analysis,
+		StateToBoxInfoMap& stateToBoxInfoMap,
 		bool test)
 {
 	// Preconditions
@@ -677,13 +789,20 @@ const Box* Folding::makeBox1Component(
 	std::pair<TreeAutShPtr, TreeAutShPtr> resKerPair =
 		this->separateCutpoint(outputSignature, root, state, aux);
 
+	size_t boxLevel = Folding::getNestingLevel(*resKerPair.second) + 1;
+
+	if (level != 0 && boxLevel != level)
+		return std::make_pair(nullptr, boxLevel > level);
+
 	index[root] = start++;
 
 	for (const ConnectionGraph::CutpointInfo& cutpoint : outputSignature)
 	{	// for all cutpoints in the signature of the split automaton
 		if (forbidden.count(cutpoint.root))
 		{	// in the case the cutpoint is forbidden to be folded
-			return nullptr;         // stop the folding procedure
+			FA_DEBUG_AT(3, "forbidden");
+
+			return std::make_pair(nullptr, false);         // stop the folding procedure
 		}
 
 		assert(cutpoint.root < index.size());
@@ -701,7 +820,9 @@ const Box* Folding::makeBox1Component(
 	if (!Folding::computeSelectorMap(selectorMap, root, state))
 	{	// in the case the box cannot be created (not all transitions from 'state'
 		// have the same signature)
-		return nullptr;
+		FA_DEBUG_AT(3, "inconsistent signature");
+
+		return std::make_pair(nullptr, false);
 	}
 
 	// get the input mapping of components to selector offsets
@@ -714,28 +835,46 @@ const Box* Folding::makeBox1Component(
 			/* the TA */ this->relabelReferences(*resKerPair.second, index),
 			/* signature of the TA */ outputSignature,
 			/* mapping of cutpoints to selectos */ inputMap,
-			/* index renaming cutpoints */ index
+			/* index renaming cutpoints */ index,
+			/* nesting level */ boxLevel
 		)
 	);
 
-	// find the box in the database
-	const Box* boxPtr = this->getBox(
-		/* the box */ *box,
-		/* false if we wish to insert the box if not present */ conditional);
-
 	if (test)
 	{	// in the case we are only testing
-		return boxPtr;
+		auto boxPtr = boxMan_.lookupBox(*box);
+
+		return std::make_pair(boxPtr, boxPtr != nullptr);
 	}
 
-	if (nullptr == boxPtr)
-	{	// if the box is not in the database
+	// find the box in the database
+	const Box* boxPtr = this->getBox(*box, false);
+/*
+	if (analysis)
+	{
+		auto& boxInfo = stateToBoxInfoMap.insert(std::make_pair(state, std::unordered_map<const Box*, bool>())).first->second;
 
-		// check that something ugly has not happened
-		assert(conditional);
+		assert(boxInfo.find(boxPtr) == boxInfo.end());
 
-		return nullptr;
+		boxInfo.insert(std::make_pair(boxPtr, false));
+
+		Folding::analyzeBoxes(stateToBoxInfoMap, *box->getOutput());
 	}
+	else
+	{
+		auto stateToBoxInfoIter = stateToBoxInfoMap.find(state);
+
+		if (stateToBoxInfoIter == stateToBoxInfoMap.end())
+			return std::make_pair(nullptr, false);
+
+		auto boxInfoIter = stateToBoxInfoIter->second.find(boxPtr);
+
+		if (boxInfoIter == stateToBoxInfoIter->second.end() || boxInfoIter->second)
+			return std::make_pair(nullptr, false);
+	}
+*/
+	assert(boxPtr);
+	assert(box->getLevel() > 1);
 
 	FA_DEBUG_AT(2, *static_cast<const AbstractBox*>(boxPtr) << " found");
 
@@ -753,15 +892,17 @@ const Box* Folding::makeBox1Component(
 
 	this->invalidateSignatures(root);
 
-	return boxPtr;
+	return std::make_pair(boxPtr, true);
 }
 
 
-const Box* Folding::makeBox2Components(
+std::pair<const Box*, bool> Folding::makeBox2Components(
 		size_t root,
 		size_t aux,
 		const std::set<size_t> &forbidden,
-		bool conditional,
+		size_t level,
+		bool analysis,
+		StateToBoxInfoMap& stateToBoxInfoMap,
 		bool test)
 {
 	// Preconditions
@@ -792,12 +933,16 @@ const Box* Folding::makeBox2Components(
 	{
 		if (cutpoint.root == root)
 		{	// if this procedure cannot fold the sub-structure
-			return nullptr;
+			FA_DEBUG_AT(3, "refusing self-reference");
+
+			return std::make_pair(nullptr, false);
 		}
 
 		if (forbidden.count(cutpoint.root))
 		{	// in the case the cutpoint is forbidden to be folded
-			return nullptr;         // stop the folding procedure
+			FA_DEBUG_AT(3, "forbidden");
+
+			return std::make_pair(nullptr, false);         // stop the folding procedure
 		}
 
 		assert(cutpoint.root < index.size());
@@ -814,7 +959,9 @@ const Box* Folding::makeBox2Components(
 
 	if (!Folding::computeSelectorMap(selectorMap, root, finalState))
 	{
-		return nullptr;
+		FA_DEBUG_AT(3, "inconsistent signature");
+
+		return std::make_pair(nullptr, false);
 	}
 
 	std::vector<size_t> inputMap = extractInputMap(selectorMap, root, index);
@@ -822,6 +969,13 @@ const Box* Folding::makeBox2Components(
 	auto auxP = this->separateCutpoint(
 		inputSignature, aux, fae_.getRoot(aux)->getFinalState(), root
 	);
+
+	size_t boxLevel = std::max(
+		Folding::getNestingLevel(*resKerPair.second), Folding::getNestingLevel(*auxP.second)
+	) + 1;
+
+	if (level != 0 && boxLevel != level)
+		return std::make_pair(nullptr, boxLevel > level);
 
 /*
 	if (Folding::isSingular(*auxP.first))
@@ -832,14 +986,18 @@ const Box* Folding::makeBox2Components(
 
 	for (const ConnectionGraph::CutpointInfo& cutpoint : inputSignature)
 	{
-		if (cutpoint.refCount > 1)
+/*		if (cutpoint.refCount > 1)
 		{
-			return nullptr;
-		}
+			FA_DEBUG_AT(3, "multiple references");
+
+			return std::make_pair(nullptr, false);
+		}*/
 
 		if (forbidden.count(cutpoint.root))
 		{
-			return nullptr;
+			FA_DEBUG_AT(3, "forbidden");
+
+			return std::make_pair(nullptr, false);
 		}
 
 		assert(cutpoint.root < index.size());
@@ -866,7 +1024,7 @@ const Box* Folding::makeBox2Components(
 
 	size_t selector = extractSelector(selectorMap, root);
 
-	std::unique_ptr<Box> box = std::unique_ptr<Box>(
+	std::shared_ptr<Box> box = std::shared_ptr<Box>(
 		BoxMan::createType2Box(
 			root,
 			this->relabelReferences(*resKerPair.second, index),
@@ -876,21 +1034,46 @@ const Box* Folding::makeBox2Components(
 			this->relabelReferences(*auxP.second, index2),
 			inputSignature,
 			selector,
-			index
+			index,
+			boxLevel
 		)
 	);
 
-	auto boxPtr = this->getBox(*box, conditional);
-
 	if (test)
 	{
-		return boxPtr;
+		auto boxPtr = boxMan_.lookupBox(*box);
+
+		return std::make_pair(boxPtr, boxPtr != nullptr);
 	}
 
-	if (nullptr == boxPtr)
+	auto boxPtr = this->getBox(*box, false);
+/*
+	if (analysis)
 	{
-		return nullptr;
+		auto& boxInfo = stateToBoxInfoMap.insert(std::make_pair(finalState, std::unordered_map<const Box*, bool>())).first->second;
+
+		assert(boxInfo.find(boxPtr) == boxInfo.end());
+
+		boxInfo.insert(std::make_pair(boxPtr, false));
+
+		Folding::analyzeBoxes(stateToBoxInfoMap, *box->getOutput());
+		Folding::analyzeBoxes(stateToBoxInfoMap, *box->getInput());
 	}
+	else
+	{
+		auto stateToBoxInfoIter = stateToBoxInfoMap.find(finalState);
+
+		if (stateToBoxInfoIter == stateToBoxInfoMap.end())
+			return std::make_pair(nullptr, false);
+
+		auto boxInfoIter = stateToBoxInfoIter->second.find(boxPtr);
+
+		if (boxInfoIter == stateToBoxInfoIter->second.end() || boxInfoIter->second)
+			return std::make_pair(nullptr, false);
+	}
+*/
+	assert(boxPtr);
+	assert(box->getLevel() > 1);
 
 	FA_DEBUG_AT(2, *static_cast<const AbstractBox*>(boxPtr) << " found");
 
@@ -917,7 +1100,7 @@ const Box* Folding::makeBox2Components(
 
 	this->invalidateSignatures(aux);
 
-	return boxPtr;
+	return std::make_pair(boxPtr, true);
 }
 
 
@@ -1029,47 +1212,37 @@ bool Folding::computeSelectorMap(
 
 void Folding::learn1(FAE& fae, BoxMan& boxMan, std::set<size_t> forbidden)
 {
-	fae.unreachableFree();
-
-	Folding folding(fae, boxMan);
-
-	for (size_t i = 0; i < fae.getRootCount(); ++i)
-	{
-		if (forbidden.count(i))
-			continue;
-
-		assert(fae.getRoot(i));
-
-		folding.discover1(i, forbidden, false);
-		folding.discover2(i, forbidden, false);
-	}
+	throw "not implemented";
 }
 
 void Folding::learn2(FAE& fae, BoxMan& boxMan, std::set<size_t> forbidden)
 {
-	fae.unreachableFree();
-
-	Folding folding(fae, boxMan);
-
-	for (size_t i = 0; i < fae.getRootCount(); ++i)
-	{
-		if (forbidden.count(i))
-			continue;
-
-		assert(fae.getRoot(i));
-
-		folding.discover3(i, forbidden, false);
-	}
+	throw "not implemented";
 }
 
-std::unordered_map<size_t, std::vector<const Box *>> Folding::fold(
+std::pair<std::unordered_map<size_t, std::vector<const Box *>>, bool> Folding::fold(
         FAE&                         fae,
         BoxMan&                      boxMan,
-        const std::set<size_t>&      forbidden)
+#if FA_BOX_APPROXIMATION
+	BoxAntichain&		     boxAntichain,
+#endif
+        const std::set<size_t>&      forbidden,
+        size_t			     level,
+        bool			     discover3Only,
+        bool			     analysis,
+        StateToBoxInfoMap&	     stateToBoxInfoMap
+        )
 {
 	std::unordered_map<size_t, std::vector<const Box *>> foldedRoots;
 
+#if FA_BOX_APPROXIMATION
+//	Folding folding(fae, boxMan, boxMan.boxAntichain());
+	Folding folding(fae, boxMan, boxAntichain);
+#else
 	Folding folding(fae, boxMan);
+#endif
+
+	bool found = false;
 
 	for (size_t i = 0; i < fae.getRootCount(); ++i)
 	{
@@ -1085,9 +1258,12 @@ std::unordered_map<size_t, std::vector<const Box *>> Folding::fold(
 		// boxes is allowed
 
 		foldedRoots[i] = std::vector<const Box *>();
-		folding.discover1(i, forbidden, true, &foldedRoots.at(i));
-		folding.discover2(i, forbidden, true, &foldedRoots.at(i));
-		folding.discover3(i, forbidden, true, &foldedRoots.at(i));
+		found |= folding.discover3(i, forbidden, level, analysis, stateToBoxInfoMap, &foldedRoots.at(i));
+		if (!discover3Only)
+		{
+			found |= folding.discover1(i, forbidden, level, analysis, stateToBoxInfoMap, &foldedRoots.at(i));
+			found |= folding.discover2(i, forbidden, level, analysis, stateToBoxInfoMap, &foldedRoots.at(i));
+		}
 
 		if (foldedRoots.at(i).size() == 0)
 		{
@@ -1100,5 +1276,169 @@ std::unordered_map<size_t, std::vector<const Box *>> Folding::fold(
 		FA_DEBUG_AT(3, "after folding: " << std::endl << fae);
 	}
 
-	return foldedRoots;
+	return std::make_pair(foldedRoots, found);
+}
+
+bool Folding::updateBoxSignature(
+		StateToBoxSignatureMap& stateMap,
+		size_t             		state,
+		const BoxSignature&		boxSignature)
+{
+	auto itBoolPair = stateMap.insert(std::make_pair(state, boxSignature));
+
+	if (itBoolPair.second)
+		return true;
+
+	// in case the state is already mapped to something
+	BoxSignature& prevSignature = itBoolPair.first->second;
+
+	bool changed = false;
+
+	for (auto& boxOriginPair : prevSignature)
+	{
+		auto iter = boxSignature.find(boxOriginPair.first);
+		if (iter == boxSignature.end() && (boxOriginPair.second != static_cast<size_t>(-1)))
+		{
+			boxOriginPair.second = static_cast<size_t>(-1);
+			changed = true;
+		}
+	}
+
+	for (auto& boxOriginPair : boxSignature)
+	{
+		auto itBoolPair2 = prevSignature.insert(boxOriginPair);
+
+		if (itBoolPair2.second || (boxOriginPair.second != itBoolPair2.first->second && itBoolPair2.first->second != static_cast<size_t>(-1)))
+		{
+			itBoolPair2.first->second = static_cast<size_t>(-1);
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
+
+void Folding::joinBoxSignature(BoxSignature& dst, const std::pair<const Box*, size_t>& boxOriginPair)
+{
+	auto itBoolPair = dst.insert(boxOriginPair);
+
+	if (itBoolPair.second)
+		return;
+
+	// -1 indicates that box appears multiple times
+	itBoolPair.first->second = static_cast<size_t>(-1);
+}
+
+
+void Folding::joinBoxSignature(BoxSignature& dst, const BoxSignature& src)
+{
+	for (auto& boxOriginPair : src)
+		joinBoxSignature(dst, boxOriginPair);
+}
+
+
+bool Folding::processLhs(
+		BoxSignature&					result,
+		const std::vector<size_t>&  	lhs,
+		const StateToBoxSignatureMap&	stateMap)
+{
+	for (auto state : lhs)
+	{
+		auto it = stateMap.find(state);
+
+		if (it == stateMap.end())
+			return false;
+
+		joinBoxSignature(result, it->second);
+	}
+
+	return true;
+}
+
+
+void Folding::computeBoxSignatureMap(
+		StateToBoxSignatureMap&	stateMap,
+		const TreeAut&			ta)
+{
+	stateMap.clear();
+
+	// the workset of transitions
+	std::vector<TreeAut::Transition> transitions;
+
+	// compute the initial signatures for leaves, other signatures are cleared
+	for (auto trans : ta)
+	{	// traverse transitions of the TA
+		if (TreeAut::GetSymbol(trans)->isData())
+		{	// for data transitions
+			stateMap.insert(std::make_pair(trans.GetParent(), BoxSignature()));
+		} else
+		{	// for non-data transitions
+			transitions.push_back(trans);
+		}
+	}
+
+	BoxSignature boxSignature;
+
+	// Now we propagate the computed signatures upward in the tree structure until the signatures
+	// stabilize. 'transitions' contains transitions that are to be processed.
+	bool changed = true;
+	while (changed)
+	{	// while there are still some transitions to be processed
+		changed = false;
+		for (auto t : transitions)
+		{
+			boxSignature.clear();
+
+			if (!processLhs(boxSignature, t.GetChildren(), stateMap))
+			{	// in case this transition cannot be processed because of some downward
+				// states with missing box information
+				continue;
+			}
+
+			for (const AbstractBox* box : TreeAut::GetSymbol(t)->getNode())
+			{	// for all boxes in the label
+				assert(nullptr != box);
+
+				if (box->isBox())
+				{
+					joinBoxSignature(boxSignature, std::make_pair(static_cast<const Box*>(box), t.GetParent()));
+				}
+			}
+
+			changed |= updateBoxSignature(stateMap, t.GetParent(), boxSignature);
+		}
+	}
+}
+
+void Folding::analyzeBoxes(StateToBoxInfoMap& stateToBoxInfoMap, const TreeAut& ta)
+{
+	StateToBoxSignatureMap stateMap;
+
+	computeBoxSignatureMap(stateMap, ta);
+
+	for (auto finalState : ta.getFinalStates())
+	{
+		auto boxSignatureIter = stateMap.find(finalState);
+
+		assert(boxSignatureIter != stateMap.end());
+
+		for (auto& boxStatePair : boxSignatureIter->second)
+		{
+			if (boxStatePair.second == static_cast<size_t>(-1))
+				continue;
+
+			auto stateBoxInfoIter = stateToBoxInfoMap.find(boxStatePair.second);
+
+			if (stateBoxInfoIter == stateToBoxInfoMap.end())
+				continue;
+
+			auto boxInfoIter = stateBoxInfoIter->second.find(boxStatePair.first);
+
+			if (boxInfoIter == stateBoxInfoIter->second.end())
+				continue;
+
+			boxInfoIter->second = true;
+		}
+	}
 }

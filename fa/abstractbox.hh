@@ -43,13 +43,15 @@ protected:// data members
 
 	size_t arity_;
 	size_t order_;
+	size_t level_;
 
 protected:// methods
 
 	AbstractBox(box_type_e type, size_t arity) :
 		type_(type),
 		arity_(arity),
-		order_(0)
+		order_(0),
+		level_(0)
 	{ }
 
 public:
@@ -94,6 +96,11 @@ public:
 		return order_;
 	}
 
+	size_t getLevel() const
+	{
+		return level_;
+	}
+
 	virtual void toStream(std::ostream& os) const = 0;
 
 	friend std::ostream& operator<<(std::ostream& os, const AbstractBox& rhs)
@@ -115,7 +122,9 @@ protected:// methods
 
 	StructuralBox(box_type_e type, size_t arity) :
 		AbstractBox(type, arity)
-	{ }
+	{
+		this->level_ = 1;
+	}
 
 public:
 

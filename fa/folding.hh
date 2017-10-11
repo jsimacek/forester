@@ -42,11 +42,17 @@ private:  // data types
 	typedef TreeAut::Transition Transition;
 	typedef std::shared_ptr<TreeAut> TreeAutShPtr;
 
+public:
+	typedef std::unordered_map<size_t, std::unordered_map<const Box*, bool>> StateToBoxInfoMap;
+
 private:  // data members
 
 	FAE& fae_;
 	BoxMan& boxMan_;
 
+#if FA_BOX_APPROXIMATION
+	BoxAntichain& boxAntichain_;
+#endif
 	std::vector<std::pair<bool, ConnectionGraph::StateToCutpointSignatureMap>> signatureMap_;
 
 protected:
@@ -132,11 +138,13 @@ protected:
 	 * @returns  The created box (or @p nullptr if it is not in the box database
 	 *           and @p conditional is set to @p true or something bad happened)
 	 */
-	const Box* makeBox2Components(
+	std::pair<const Box*, bool> makeBox2Components(
 			size_t root,
 			size_t aux,
 			const std::set<size_t> &forbidden,
-			bool conditional = true,
+			size_t level,
+			bool analysis,
+			StateToBoxInfoMap& stateToBoxInfoMap,
 			bool test = false);
 
 
@@ -320,9 +328,24 @@ protected:
 	 */
 	const Box* getBox(const Box& box, bool conditional)
 	{
-		return (conditional)? boxMan_.lookupBox(box) : boxMan_.getBox(box);
-	}
+#if FA_BOX_APPROXIMATION
 
+	#if FA_RESTART_AFTER_BOX_DISCOVERY
+		auto oldObsoleteCount = boxAntichain_.getObsoleteList().size();
+	#endif
+
+		const Box* result = (conditional) ? boxAntichain_.lookupBox(box) : boxAntichain_.getBox(box);
+
+	#if FA_RESTART_AFTER_BOX_DISCOVERY
+		if (boxAntichain_.getObsoleteList().size() > oldObsoleteCount)
+			throw RestartRequest("box antichain modified");
+	#endif
+
+		return result;
+#else
+		return (conditional) ? boxMan_.lookupBox(box) : boxMan_.getBox(box);
+#endif
+	}
 
 	/**
 	 * @brief  Creates a box with a single component
@@ -345,14 +368,22 @@ protected:
 	 * @returns  The created box (or @p nullptr if it is not in the box database
 	 *           and @p conditional is set to @p true or something bad happened)
 	 */
-	const Box* makeBox1Component(
+	std::pair<const Box*, bool> makeBox1Component(
             size_t root,
             size_t state,
             size_t aux,
             const std::set<size_t> &forbidden,
-            bool conditional = true,
+	    size_t level,
+            bool analysis,
+	    StateToBoxInfoMap& stateToBoxInfoMap,
             bool test = false);
 
+	/**
+	 * @brief  Computes symbol nesting level
+	 *
+	 * @returns  Maximum symbol nesting level observed in ta
+	 */
+	static size_t getNestingLevel(const TreeAut& ta);
 
 public:
 
@@ -377,7 +408,9 @@ public:
 	bool discover1(
 		size_t                       root,
 		const std::set<size_t>&      forbidden,
-		bool                         conditional,
+		size_t			     level,
+		bool                         analysis,
+		StateToBoxInfoMap&	     stateToBoxInfoMap,
 		std::vector<const Box *>*   discoveredBoxes = nullptr);
 
 
@@ -402,13 +435,17 @@ public:
 	bool discover2(
 		size_t                       root,
 		const std::set<size_t>&      forbidden,
-		bool                         conditional,
+		size_t			     level,
+		bool                         analysis,
+		StateToBoxInfoMap&	     stateToBoxInfoMap,
 		std::vector<const Box *>*    discoveredBoxes = nullptr);
 
 	bool discover3(
 		size_t                      root,
 		const std::set<size_t>&     forbidden,
-		bool                        conditional,
+		size_t			     level,
+		bool                        analysis,
+		StateToBoxInfoMap&	     stateToBoxInfoMap,
 		std::vector<const Box *>*   discoveredBoxes = nullptr);
 
 	static void learn1(FAE& fae,
@@ -431,20 +468,63 @@ public:
      *
      * @returns  @p Set of roots of TAs where folding was done
      */
-    static std::unordered_map<size_t, std::vector<const Box *>> fold(
+    static std::pair<std::unordered_map<size_t, std::vector<const Box *>>, bool> fold(
         FAE&                         fae,
         BoxMan&                      boxMan,
-        const std::set<size_t>&      forbidden);
+#if FA_BOX_APPROXIMATION
+	BoxAntichain&		     boxAntichain,
+#endif
+        const std::set<size_t>&      forbidden,
+        size_t			     level,
+        bool			     discover3Only,
+        bool			     analysis,
+	StateToBoxInfoMap&	     stateToBoxInfoMap);
 
 public:
 
 	Folding(
 		FAE&           fae,
-		BoxMan&        boxMan) :
+		BoxMan&        boxMan
+#if FA_BOX_APPROXIMATION
+		, BoxAntichain& boxAntichain
+#endif
+	) :
 		fae_(fae),
 		boxMan_(boxMan),
+#if FA_BOX_APPROXIMATION
+		boxAntichain_(boxAntichain),
+#endif
 		signatureMap_(fae.getRootCount())
 	{ }
+
+private:
+	typedef std::unordered_map<const Box*, size_t>		BoxSignature;
+	typedef std::unordered_map<size_t, BoxSignature>	StateToBoxSignatureMap;
+
+	static bool updateBoxSignature(
+		StateToBoxSignatureMap&	stateMap,
+		size_t			state,
+		const BoxSignature&	boxSignature);
+
+	static void joinBoxSignature(
+		BoxSignature&				dst,
+		const std::pair<const Box*, size_t>&	boxOriginPair);
+
+	static void joinBoxSignature(BoxSignature& dst, const BoxSignature& src);
+
+	static bool processLhs(
+		BoxSignature&			result,
+		const std::vector<size_t>&	lhs,
+		const StateToBoxSignatureMap&	stateMap);
+
+public:
+
+	static void computeBoxSignatureMap(
+		StateToBoxSignatureMap&	stateMap,
+		const TreeAut&		ta);
+
+	static void analyzeBoxes(StateToBoxInfoMap& stateToBoxInfoMap, const TreeAut& ta);
+
 };
 
 #endif

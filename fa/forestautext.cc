@@ -40,49 +40,6 @@ bool FAE::subseteq(const FAE& lhs, const FAE& rhs)
 }
 
 
-TreeAut& FAE::relabelReferences(
-	TreeAut&                      dst,
-	const TreeAut&                src,
-	const std::vector<size_t>&    index)
-{
-	dst.addFinalStates(src.getFinalStates());
-	for (const Transition& tr : src)
-	{
-		if (TreeAut::GetSymbol(tr)->isData())
-			continue;
-
-		std::vector<size_t> lhs;
-		for (size_t state : tr.GetChildren())
-		{
-			const Data* data;
-			if (this->isData(state, data))
-			{
-				if (data->isRef())
-				{
-					if (index[data->d_ref.root] != static_cast<size_t>(-1))
-					{
-						lhs.push_back(this->addData(dst, Data::createRef(index[data->d_ref.root], data->d_ref.displ)));
-					}
-					else
-					{
-						lhs.push_back(this->addData(dst, Data::createUndef()));
-					}
-				} else {
-					lhs.push_back(this->addData(dst, *data));
-				}
-			} else
-			{
-				lhs.push_back(state);
-			}
-		}
-
-		dst.addTransition(lhs, TreeAut::GetSymbol(tr), tr.GetParent());
-	}
-
-	return dst;
-}
-
-
 TreeAut& FAE::invalidateReference(
 	TreeAut&                       dst,
 	const TreeAut&                 src,

@@ -26,6 +26,7 @@ bool ConnectionGraph::CutpointInfo::operator%(const CutpointInfo& rhs) const
 {
 			return this->root == rhs.root &&
 				this->refCount == rhs.refCount &&
+//				this->refInherited == rhs.refInherited &&
 #if FA_TRACK_SELECTORS
 				this->selCount == rhs.selCount &&
 #endif
@@ -529,6 +530,7 @@ void ConnectionGraph::normalizeSignature(CutpointSignature& signature)
 		if (itBoolPair.second)
 		{	// in case there is no record for the given root in 'm'
 			signature[offset] = signature[i];
+//			signature[offset].refInherited = true;//signature[offset].refCount > 1;
 			signature[offset].refInherited = signature[offset].refCount > 1;
 
 			++offset;
@@ -787,10 +789,23 @@ void ConnectionGraph::updateRoot(
 
 	this->data[root].signature = stateMap[*iter];
 
+	auto& refSignature = this->data[root].signature;
+
 	for (++iter; iter != ta.getFinalStates().end(); ++iter)
 	{
 		assert(stateMap.find(*iter) != stateMap.end());
-		assert(this->data[root].signature == stateMap[*iter]);
+
+		auto& currentSignature = stateMap[*iter];
+
+		assert(refSignature.size() == currentSignature.size());
+
+		for (size_t i = 0; i < refSignature.size(); ++i)
+		{
+			assert(refSignature[i].root == currentSignature[i].root);
+			assert(refSignature[i].refCount == currentSignature[i].refCount);
+			assert(refSignature[i].bwdSelector == currentSignature[i].bwdSelector);
+			assert(refSignature[i].defines == currentSignature[i].defines);
+		}
 	}
 
 	this->updateBackwardData(root);

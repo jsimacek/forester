@@ -97,6 +97,8 @@ protected:
 		const std::vector<bool>&          marked,
 		const std::vector<size_t>&        order);
 
+	bool hasAcceptingLeafTransitions();
+
 public:
 
 	void scan(

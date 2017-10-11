@@ -108,7 +108,6 @@ private:  // methods
 		F                                  f,
 		std::set<const Box*>&              boxes);
 
-
 	/**
 	 * @brief  Unfolds for given offsets at desired root
 	 *
@@ -195,9 +194,9 @@ public:   // methods
 		int                                base,
 		const std::vector<size_t>&         offsets);
 
-	void split(std::vector<size_t>& newRoots, size_t root, const std::vector<size_t>& targetStates);
+	void split(std::vector<size_t>& newRoots, size_t root, const std::unordered_map<size_t, std::set<const Box*>>& targetStateMap);
 
-
+	void isolateBoxesAtRoot(size_t root, const std::set<const Box*>& boxes);
 };
 
 #endif

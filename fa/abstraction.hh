@@ -53,7 +53,6 @@ public:   // methods
 		size_t                height,
 		F                     f)
 	{
-		FA_DEBUG_AT(1,"Height abstraction of height " << height);
 		// Preconditions
 		assert(root < fae_.getRootCount());
 		assert(nullptr != fae_.getRoot(root));
@@ -72,7 +71,6 @@ public:   // methods
 		};
 
 		rootTA.heightAbstraction(rel, height, f, cutpointCmp);
-
 
 		TreeAut ta = fae_.createTAWithSameBackend();
 		rootTA.collapsed(ta, rel);
